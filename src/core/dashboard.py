@@ -9,6 +9,10 @@ from typing import Any
 
 from core.ui_events import PHASE_DISPLAY
 
+MAX_CURRENT_WORK = 140
+MAX_ACTIVITY_LINE = 140
+MAX_ACTIVITY_LINES = 6
+
 
 @dataclass
 class DashboardState:
@@ -16,6 +20,17 @@ class DashboardState:
     current_work: str = "Waiting for workflow events..."
     activity: list[str] = field(default_factory=list)
     status: str = "running"
+
+
+def _compact_text(value: object, limit: int) -> str:
+    text = " ".join(str(value or "").split())
+    if len(text) <= limit:
+        return text
+    return text[: limit - 3].rstrip() + "..."
+
+
+def _short_phase_description(description: str) -> str:
+    return _compact_text(description, 46)
 
 
 def _load_events(path: Path, offset: int) -> tuple[list[dict[str, Any]], int]:
@@ -43,7 +58,7 @@ def _apply_event(state: DashboardState, event: dict[str, Any]) -> None:
     event_type = str(event.get("event_type") or "")
     phase_id = event.get("phase_id")
     status = str(event.get("status") or "")
-    message = str(event.get("message") or "")
+    message = _compact_text(event.get("message") or "", MAX_CURRENT_WORK)
     timestamp = str(event.get("timestamp") or "")[11:19]
     agent_role = event.get("agent_role")
     session_id = event.get("session_id")
@@ -80,9 +95,12 @@ def _apply_event(state: DashboardState, event: dict[str, Any]) -> None:
         "repair_iteration_finished",
     }:
         actor = str(agent_role or session_id or event_type)
-        line = f"{timestamp} {actor} {status} {message}".strip()
+        line = _compact_text(
+            f"{timestamp} {actor} {status} {message}".strip(),
+            MAX_ACTIVITY_LINE,
+        )
         state.activity.append(line)
-        state.activity = state.activity[-12:]
+        state.activity = state.activity[-MAX_ACTIVITY_LINES:]
         if message:
             state.current_work = message
 
@@ -109,19 +127,19 @@ def run_dashboard(events_path: str | Path, stop_event: threading.Event) -> None:
         table = Table(expand=True)
         table.add_column("Phase", ratio=2)
         table.add_column("Status", ratio=1)
-        table.add_column("What it does", ratio=4)
+        table.add_column("What it does", ratio=3)
         for phase_id, copy in PHASE_DISPLAY.items():
             phase = state.phases.get(phase_id, {})
             table.add_row(
                 copy.title,
                 str(phase.get("status", "pending")),
-                copy.description,
+                _short_phase_description(copy.description),
             )
         activity = "\n".join(state.activity) or "No agent activity yet."
         return Group(
             Panel(Text(f"SEAM Migration Dashboard  status={state.status}"), title="Run"),
             Panel(table, title="Phase Timeline"),
-            Panel(state.current_work, title="Current Work"),
+            Panel(_compact_text(state.current_work, MAX_CURRENT_WORK), title="Current Work"),
             Panel(activity, title="Live Agent Activity"),
             Panel("q: quit dashboard view | logs and migration continue", title="Shortcuts"),
         )
@@ -208,7 +226,7 @@ class SeamDashboardApp:
                     phase = self.state.phases.get(phase_id, {})
                     lines.append(
                         f"{phase.get('status', 'pending'):>10}  {copy.title}\n"
-                        f"            {copy.description}"
+                        f"            {_short_phase_description(copy.description)}"
                     )
                 return "\n".join(lines)
 

@@ -9,6 +9,7 @@ from core.ui_events import (
     dashboard_enabled,
     summarize_text,
 )
+from core.dashboard import DashboardState, _apply_event
 from core.types import PhaseDefinition, WorkflowDefinition
 from core.workflow_executor import WorkflowExecutor
 from tests.e2e.e2e_observer import TelemetryObserver
@@ -108,6 +109,27 @@ def test_summarize_text_redacts_and_truncates_sensitive_values() -> None:
     assert "sk-abc" not in summary
     assert "OPENAI_API_KEY=<REDACTED>" in summary
     assert len(summary) <= 83
+
+
+def test_dashboard_event_application_keeps_long_agent_prompts_compact() -> None:
+    state = DashboardState()
+    long_prompt = " ".join(["dependency_fixer"] * 80)
+
+    for index in range(12):
+        _apply_event(
+            state,
+            {
+                "event_type": "agent_command_started",
+                "timestamp": f"2026-07-01T09:13:{index:02d}+00:00",
+                "agent_role": "dependency_fixer",
+                "status": "running",
+                "message": long_prompt,
+            },
+        )
+
+    assert len(state.current_work) <= 140
+    assert len(state.activity) <= 6
+    assert all(len(line) <= 140 for line in state.activity)
 
 
 def test_telemetry_observer_emits_session_and_command_ui_events(tmp_path: Path) -> None:
