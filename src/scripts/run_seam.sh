@@ -54,6 +54,9 @@ Options:
   --opencode-message-timeout N
                               Timeout for model-backed OpenCode message probe
   --opencode-diagnose-only    Run OpenCode diagnostics and exit before launching E2E
+  --dashboard                 Force live terminal dashboard on
+  --no-dashboard              Force live terminal dashboard off
+  --dashboard-mode MODE       Dashboard mode: auto, on, or off (default: auto)
   --dry-run                   Validate paths without running migration
   --extra 'ARGS...'           Pass extra arguments to the E2E harness
   --verbose                   Enable verbose debug logging
@@ -148,6 +151,18 @@ while [[ $# -gt 0 ]]; do
         --opencode-diagnose-only)
             FORWARD_ARGS+=("--opencode-diagnose-only")
             shift
+            ;;
+        --dashboard)
+            FORWARD_ARGS+=("--dashboard")
+            shift
+            ;;
+        --no-dashboard)
+            FORWARD_ARGS+=("--no-dashboard")
+            shift
+            ;;
+        --dashboard-mode)
+            FORWARD_ARGS+=("--dashboard-mode" "$2")
+            shift 2
             ;;
         --dry-run)
             FORWARD_ARGS+=("--dry-run")

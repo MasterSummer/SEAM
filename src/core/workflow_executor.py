@@ -76,6 +76,7 @@ from core.repair_loop import (
     force_custom_op_operator_routing_if_needed,
 )
 from core.platform_policy import resolve_policy, PlatformPolicy
+from core.ui_events import UIEventSink, summarize_text
 from validators.validate_entry_script import (
     validate as validate_entry_script,
     _extract_env_prefix,
@@ -387,6 +388,7 @@ class WorkflowExecutor:
         hook_manager: HookManager | None = None,
         experience_store=None,
         exec_backend: Any = None,
+        ui_event_sink: UIEventSink | None = None,
     ) -> None:
         self.workflow = workflow
         self.session_mgr = session_mgr
@@ -408,6 +410,7 @@ class WorkflowExecutor:
         self.telemetry_observer = telemetry_observer
         self.experience_store = experience_store
         self.exec_backend = exec_backend
+        self.ui_event_sink = ui_event_sink
         self._initialize_execution_backend()
         self._container_env_probe = getattr(self, "_container_env_probe", None)
         self._runtime_skill_resolver: RuntimeSkillResolver | None = None
@@ -661,6 +664,14 @@ class WorkflowExecutor:
         if callable(setter):
             setter(phase_id)
 
+    def _emit_ui_event(self, event_type: str, **kwargs: Any) -> None:
+        if self.ui_event_sink is None:
+            return
+        try:
+            self.ui_event_sink.emit(event_type, **kwargs)
+        except Exception:  # pylint: disable=broad-exception-caught
+            logger.debug("UI event emission failed", exc_info=True)
+
     # ── Main entry point ────────────────────────────────────────────────
 
     def execute(self, context: dict) -> dict:
@@ -710,6 +721,13 @@ class WorkflowExecutor:
                         "duration": 0,
                         "reason": "phase7_disabled",
                     }
+                    self._emit_ui_event(
+                        "phase_finished",
+                        phase_id=phase.id,
+                        status="skipped",
+                        message="Phase skipped because experience phase7 is disabled",
+                        details={"reason": "phase7_disabled"},
+                    )
                     idx = self.phase_index.get(phase.id, -1)
                     phases_list = self.workflow.phases or []
                     if idx >= 0 and idx + 1 < len(phases_list):
@@ -728,6 +746,13 @@ class WorkflowExecutor:
                         "duration": 0,
                         "reason": "condition_false",
                     }
+                    self._emit_ui_event(
+                        "phase_finished",
+                        phase_id=phase.id,
+                        status="skipped",
+                        message="Phase condition evaluated to false",
+                        details={"reason": "condition_false"},
+                    )
                     next_id = self._get_next_phase_id(phase, "skipped", self.state, ctx)
                     current_phase_id = next_id
                     continue
@@ -738,6 +763,13 @@ class WorkflowExecutor:
             status: str = "success"
             output: Any = {}
             self._set_telemetry_active_phase(phase.id)
+            self._emit_ui_event(
+                "phase_started",
+                phase_id=phase.id,
+                status="running",
+                message=f"Executing {phase.id}",
+                details={"phase_type": phase_type},
+            )
 
             try:
                 if phase_type == "llm":
@@ -777,6 +809,13 @@ class WorkflowExecutor:
                             "duration": time.time() - start_t,
                             "target": next_id,
                         }
+                        self._emit_ui_event(
+                            "phase_finished",
+                            phase_id=phase.id,
+                            status="dispatched",
+                            message=f"Dispatched to {next_id}",
+                            details={"target": next_id},
+                        )
                         self._set_telemetry_active_phase(None)
                         continue
                     status = "success"
@@ -802,6 +841,13 @@ class WorkflowExecutor:
                 output = {"error": str(exc), "traceback": traceback.format_exc()}
 
             duration = time.time() - start_t
+            self._emit_ui_event(
+                "phase_finished",
+                phase_id=phase.id,
+                status=status,
+                message=f"Phase {phase.id} finished with {status}",
+                details={"duration_seconds": round(duration, 3)},
+            )
 
             # Record results
             self.phase_results[phase.id] = {
@@ -842,6 +888,12 @@ class WorkflowExecutor:
             current_phase_id = next_id
 
         self._set_telemetry_active_phase(None)
+        self._emit_ui_event(
+            "workflow_finished",
+            status="complete",
+            message="Workflow execution finished",
+            details={"phase_count": len(self.phase_results)},
+        )
 
         # 4. workflow_end hooks
         try:
@@ -1285,16 +1337,45 @@ class WorkflowExecutor:
           - $.field_name shorthand for loop_state / step_outputs lookup
           - Boolean operators: ==, !=, >, <, >=, <=, and, or, not, in
         """
-        # Step 1: Resolve ${...} templates
-        resolved = self.resolver.resolve(
-            condition,
-            state=state,
-            globals=self.workflow.globals,
-            context=context,
-            loop_vars=loop_vars,
-            loop_state=loop_state,
-            step_outputs=step_outputs,
-        )
+        # Step 1: Resolve ${...} templates. For embedded templates inside a
+        # boolean expression, preserve strings as literals so empty values do
+        # not turn `${context.X} != ''` into the malformed expression `!= ''`.
+        template_pattern = getattr(self.resolver, "_pattern", None)
+        if template_pattern is not None and template_pattern.fullmatch(condition):
+            resolved = self.resolver.resolve(
+                condition,
+                state=state,
+                globals=self.workflow.globals,
+                context=context,
+                loop_vars=loop_vars,
+                loop_state=loop_state,
+                step_outputs=step_outputs,
+            )
+        elif "${" in condition and template_pattern is not None:
+
+            def template_repl(match: re.Match) -> str:
+                value = self.resolver._resolve_expr(  # noqa: SLF001 - condition evaluator needs literal-preserving substitution.
+                    match.group(1).strip(),
+                    state=state,
+                    globals=self.workflow.globals,
+                    context=context,
+                    loop_vars=loop_vars,
+                    loop_state=loop_state,
+                    step_outputs=step_outputs,
+                )
+                return json.dumps(value, ensure_ascii=False, default=str)
+
+            resolved = template_pattern.sub(template_repl, condition)
+        else:
+            resolved = self.resolver.resolve(
+                condition,
+                state=state,
+                globals=self.workflow.globals,
+                context=context,
+                loop_vars=loop_vars,
+                loop_state=loop_state,
+                step_outputs=step_outputs,
+            )
         if not isinstance(resolved, str):
             return bool(resolved)
 
@@ -1755,7 +1836,7 @@ class WorkflowExecutor:
         "phase_0_env_detect": [],
         "phase_1_project_analysis": [],
         "phase_2_venv_create": [],
-        # Phase 1.5 gets `phase_1_context` separately; do not duplicate.
+        # Phase 1.5 only consumes user constraints.
         "phase_1_5_constraint_summary": [],
         # Phase 3 only needs its own input mapping; no prior outputs required.
         "phase_3_entry_script": [],
@@ -1838,16 +1919,6 @@ class WorkflowExecutor:
         state: dict,
     ) -> None:
         pid = phase.id
-        if "phase_1_5" in pid or "constraint_summary" in pid:
-            ph1 = state.get("phase_1_project_analysis", {})
-            if isinstance(ph1, dict) and ph1:
-                input_ctx.setdefault(
-                    "phase_1_context", json.dumps(ph1, indent=2, ensure_ascii=False)
-                )
-            else:
-                input_ctx.setdefault(
-                    "phase_1_context", "(No phase 1 context available)"
-                )
         if "phase_35" in pid or "static_validate" in pid:
             ph3 = state.get("phase_3_entry_script", {})
             if isinstance(ph3, dict):
@@ -2902,10 +2973,18 @@ class WorkflowExecutor:
 
         entry_script_command = self._is_phase5_entry_script_command(phase, loop_vars)
         timeout = phase.timeout
+        self._emit_ui_event(
+            "shell_command_started",
+            phase_id="phase_5_validation" if entry_script_command else phase.id,
+            subphase_id=phase.id,
+            status="running",
+            message=summarize_text(cmd, 180),
+            details={"cwd": cwd, "timeout_seconds": timeout},
+        )
 
         # Container backend path
         if isinstance(self.exec_backend, ContainerBackend):
-            return self._execute_shell_phase_container(
+            result = self._execute_shell_phase_container(
                 phase,
                 cmd,
                 cwd,
@@ -2916,9 +2995,11 @@ class WorkflowExecutor:
                 loop_vars=loop_vars,
                 loop_state=loop_state,
             )
+            self._emit_shell_finished_event(phase, result, entry_script_command)
+            return result
 
         # Local path (existing code, unchanged)
-        return self._execute_shell_phase_local(
+        result = self._execute_shell_phase_local(
             phase,
             cmd,
             cwd,
@@ -2928,6 +3009,37 @@ class WorkflowExecutor:
             context,
             loop_vars=loop_vars,
             loop_state=loop_state,
+        )
+        self._emit_shell_finished_event(phase, result, entry_script_command)
+        return result
+
+    def _emit_shell_finished_event(
+        self,
+        phase: PhaseDefinition,
+        result: tuple[str, dict],
+        entry_script_command: bool,
+    ) -> None:
+        status, captured = result
+        exit_code = captured.get("exit_code") if isinstance(captured, dict) else None
+        artifact_path = None
+        if isinstance(captured, dict):
+            artifacts = captured.get("artifacts")
+            if isinstance(artifacts, dict):
+                meta_path = artifacts.get("meta_path")
+                artifact_path = str(meta_path) if meta_path else None
+        self._emit_ui_event(
+            "shell_command_finished",
+            phase_id="phase_5_validation" if entry_script_command else phase.id,
+            subphase_id=phase.id,
+            status=status,
+            message=f"Shell command exited with {exit_code}",
+            details={
+                "exit_code": exit_code,
+                "duration_seconds": captured.get("duration")
+                if isinstance(captured, dict)
+                else None,
+            },
+            artifact_path=artifact_path,
         )
 
     def _execute_shell_phase_container(
@@ -3892,6 +4004,18 @@ class WorkflowExecutor:
                 max_iterations,
                 phase.id,
             )
+            self._emit_ui_event(
+                "repair_iteration_started",
+                phase_id=phase.id,
+                subphase_id=getattr(sub_wf_def, "id", None),
+                status="running",
+                message=f"Repair iteration {iteration}/{max_iterations}",
+                details={
+                    "attempt": iteration,
+                    "max_attempts": max_iterations,
+                    "stagnation_count": loop_state.get("stagnation_count", 0),
+                },
+            )
             iter_start = time.time()
             step_outputs: dict[str, Any] = {}
             self._carry_pending_experience_verifications(loop_state, step_outputs)
@@ -3983,6 +4107,21 @@ class WorkflowExecutor:
                 history_entry["fixer_outputs"] = fixer_outputs
             loop_history.append(history_entry)
             loop_state["iteration"] = iteration
+            self._emit_ui_event(
+                "repair_iteration_finished",
+                phase_id=phase.id,
+                subphase_id=getattr(sub_wf_def, "id", None),
+                status=str(iter_status),
+                message=f"Repair iteration {iteration} finished",
+                details={
+                    "attempt": iteration,
+                    "duration_seconds": round(iter_duration, 3),
+                    "script_exit_code": loop_state.get("script_exit_code"),
+                    "error_category": history_entry.get("error_category"),
+                    "repair_role": history_entry.get("repair_role"),
+                    "stagnation_count": loop_state.get("stagnation_count", 0),
+                },
+            )
 
             # 4b. Check stop conditions
             stop_conds = (
