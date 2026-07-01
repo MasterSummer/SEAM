@@ -9,7 +9,7 @@ from core.ui_events import (
     dashboard_enabled,
     summarize_text,
 )
-from core.dashboard import DashboardState, _apply_event
+from core.dashboard import DashboardState, _apply_event, visible_phase_rows
 from core.types import PhaseDefinition, WorkflowDefinition
 from core.workflow_executor import WorkflowExecutor
 from tests.e2e.e2e_observer import TelemetryObserver
@@ -78,8 +78,8 @@ def test_ui_event_sink_is_non_critical_when_path_is_unwritable(tmp_path: Path) -
 
 
 def test_phase_display_copy_uses_user_facing_names() -> None:
-    assert PHASE_DISPLAY["phase_0_env_detect"].title == "Environment Detection"
-    assert PHASE_DISPLAY["phase_5_validation"].title == "Runtime Validation & Repair"
+    assert PHASE_DISPLAY["phase_0_env_detect"].title == "环境检测"
+    assert PHASE_DISPLAY["phase_5_validation"].title == "运行验证与自动修复"
     assert "真实" in PHASE_DISPLAY["phase_5_validation"].description
 
 
@@ -130,6 +130,47 @@ def test_dashboard_event_application_keeps_long_agent_prompts_compact() -> None:
     assert len(state.current_work) <= 140
     assert len(state.activity) <= 6
     assert all(len(line) <= 140 for line in state.activity)
+
+
+def test_visible_phase_rows_only_show_current_and_next_with_numbers() -> None:
+    state = DashboardState()
+    for phase_id in (
+        "phase_0_env_detect",
+        "phase_1_project_analysis",
+        "phase_1_5_constraint_summary",
+        "phase_2_venv_create",
+        "phase_3_entry_script",
+        "phase_35_static_validate",
+        "phase_4_rule_migration",
+    ):
+        _apply_event(
+            state,
+            {
+                "event_type": "phase_finished",
+                "phase_id": phase_id,
+                "status": "success",
+                "message": "done",
+            },
+        )
+    _apply_event(
+        state,
+        {
+            "event_type": "phase_started",
+            "phase_id": "phase_5_validation",
+            "status": "running",
+            "message": "validating",
+        },
+    )
+
+    rows = visible_phase_rows(state)
+
+    assert len(rows) == 2
+    assert rows[0].number == 8
+    assert rows[0].title == "运行验证与自动修复"
+    assert rows[0].status == "运行中"
+    assert rows[1].number == 9
+    assert rows[1].title == "报告与使用说明"
+    assert rows[1].status == "待执行"
 
 
 def test_telemetry_observer_emits_session_and_command_ui_events(tmp_path: Path) -> None:

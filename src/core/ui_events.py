@@ -30,47 +30,47 @@ class PhaseDisplay:
 
 PHASE_DISPLAY: dict[str, PhaseDisplay] = {
     "phase_0_env_detect": PhaseDisplay(
-        "Environment Detection",
+        "环境检测",
         "检测目标机器、GPU/驱动、Python、容器和平台 SDK 是否可用于迁移。",
     ),
     "phase_1_project_analysis": PhaseDisplay(
-        "Project Analysis",
+        "项目分析",
         "分析项目结构、依赖、CUDA 使用点、入口脚本和自定义算子风险。",
     ),
     "phase_1_5_constraint_summary": PhaseDisplay(
-        "User Constraints",
+        "用户约束",
         "整理用户提供的迁移要求，例如必须运行的测试、指定镜像、禁止修改项。",
     ),
     "phase_2_venv_create": PhaseDisplay(
-        "Dependency Setup",
+        "依赖准备",
         "准备迁移后的 Python/容器依赖，使项目具备可运行基础。",
     ),
     "phase_3_entry_script": PhaseDisplay(
-        "Entry Command",
+        "入口命令",
         "生成迁移后的验证入口命令，这是后续反复运行和修复的依据。",
     ),
     "phase_35_static_validate": PhaseDisplay(
-        "Entry Static Check",
+        "入口静态检查",
         "检查入口命令是否真的能验证迁移质量，而不是只做 smoke/report-only。",
     ),
     "phase_4_rule_migration": PhaseDisplay(
-        "Rule Migration",
+        "规则迁移",
         "执行确定性平台规则迁移，例如 CUDA API、设备字符串、框架调用适配。",
     ),
     "phase_5_validation": PhaseDisplay(
-        "Runtime Validation & Repair",
+        "运行验证与自动修复",
         "运行迁移后的项目，根据真实报错自动分析、路由、修复和重试。",
     ),
     "phase_6_report": PhaseDisplay(
-        "Report & Usage Guide",
+        "报告与使用说明",
         "生成迁移报告，并告诉用户如何使用迁移后的项目。",
     ),
     "phase_7a_evaluate": PhaseDisplay(
-        "Experience Learning",
+        "经验学习",
         "评估本次迁移中哪些经验可复用。",
     ),
     "phase_7b_refine": PhaseDisplay(
-        "Experience Learning",
+        "经验学习",
         "把本次迁移中可复用的经验沉淀下来，供后续项目使用。",
     ),
 }

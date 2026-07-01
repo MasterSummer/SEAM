@@ -12,6 +12,17 @@ from core.ui_events import PHASE_DISPLAY
 MAX_CURRENT_WORK = 140
 MAX_ACTIVITY_LINE = 140
 MAX_ACTIVITY_LINES = 6
+STATUS_TEXT = {
+    "pending": "待执行",
+    "running": "运行中",
+    "success": "已完成",
+    "passed": "已完成",
+    "skipped": "已跳过",
+    "failed": "失败",
+    "failure": "失败",
+    "complete": "已结束",
+    "dispatched": "已路由",
+}
 
 
 @dataclass
@@ -20,6 +31,15 @@ class DashboardState:
     current_work: str = "Waiting for workflow events..."
     activity: list[str] = field(default_factory=list)
     status: str = "running"
+
+
+@dataclass(frozen=True)
+class PhaseRow:
+    number: int
+    phase_id: str
+    title: str
+    status: str
+    description: str
 
 
 def _compact_text(value: object, limit: int) -> str:
@@ -31,6 +51,44 @@ def _compact_text(value: object, limit: int) -> str:
 
 def _short_phase_description(description: str) -> str:
     return _compact_text(description, 46)
+
+
+def _status_text(status: object) -> str:
+    return STATUS_TEXT.get(str(status or "pending"), str(status or "待执行"))
+
+
+def visible_phase_rows(state: DashboardState) -> list[PhaseRow]:
+    phase_ids = list(PHASE_DISPLAY)
+    current_index = 0
+    for index, phase_id in enumerate(phase_ids):
+        status = str(state.phases.get(phase_id, {}).get("status", "pending"))
+        if status == "running":
+            current_index = index
+            break
+    else:
+        for index, phase_id in enumerate(phase_ids):
+            status = str(state.phases.get(phase_id, {}).get("status", "pending"))
+            if status == "pending":
+                current_index = index
+                break
+        else:
+            current_index = max(len(phase_ids) - 1, 0)
+
+    selected_ids = phase_ids[current_index : current_index + 2]
+    rows: list[PhaseRow] = []
+    for phase_id in selected_ids:
+        copy = PHASE_DISPLAY[phase_id]
+        status = state.phases.get(phase_id, {}).get("status", "pending")
+        rows.append(
+            PhaseRow(
+                number=phase_ids.index(phase_id) + 1,
+                phase_id=phase_id,
+                title=copy.title,
+                status=_status_text(status),
+                description=_short_phase_description(copy.description),
+            )
+        )
+    return rows
 
 
 def _load_events(path: Path, offset: int) -> tuple[list[dict[str, Any]], int]:
@@ -125,23 +183,19 @@ def run_dashboard(events_path: str | Path, stop_event: threading.Event) -> None:
 
     def render() -> Group:
         table = Table(expand=True)
-        table.add_column("Phase", ratio=2)
-        table.add_column("Status", ratio=1)
-        table.add_column("What it does", ratio=3)
-        for phase_id, copy in PHASE_DISPLAY.items():
-            phase = state.phases.get(phase_id, {})
-            table.add_row(
-                copy.title,
-                str(phase.get("status", "pending")),
-                _short_phase_description(copy.description),
-            )
-        activity = "\n".join(state.activity) or "No agent activity yet."
+        table.add_column("编号", ratio=1)
+        table.add_column("阶段", ratio=2)
+        table.add_column("状态", ratio=1)
+        table.add_column("正在做什么", ratio=3)
+        for row in visible_phase_rows(state):
+            table.add_row(str(row.number), row.title, row.status, row.description)
+        activity = "\n".join(state.activity) or "暂无智能体活动。"
         return Group(
-            Panel(Text(f"SEAM Migration Dashboard  status={state.status}"), title="Run"),
-            Panel(table, title="Phase Timeline"),
-            Panel(_compact_text(state.current_work, MAX_CURRENT_WORK), title="Current Work"),
-            Panel(activity, title="Live Agent Activity"),
-            Panel("q: quit dashboard view | logs and migration continue", title="Shortcuts"),
+            Panel(Text(f"SEAM 迁移仪表盘  状态={_status_text(state.status)}"), title="运行"),
+            Panel(table, title="当前阶段"),
+            Panel(_compact_text(state.current_work, MAX_CURRENT_WORK), title="当前工作"),
+            Panel(activity, title="智能体活动"),
+            Panel("q: 退出仪表盘视图；迁移和日志继续运行", title="快捷键"),
         )
 
     with Live(render(), refresh_per_second=4, screen=True) as live:
@@ -213,20 +267,19 @@ class SeamDashboardApp:
                     _apply_event(self.state, event)
                 self.query_one("#timeline", Static).update(self._timeline_text())
                 self.query_one("#current", Static).update(
-                    f"Current Work\n\n{self.state.current_work}"
+                    f"当前工作\n\n{_compact_text(self.state.current_work, MAX_CURRENT_WORK)}"
                 )
                 self.query_one("#activity", Static).update(
-                    "Live Agent Activity\n\n"
-                    + ("\n".join(self.state.activity) or "No agent activity yet.")
+                    "智能体活动\n\n"
+                    + ("\n".join(self.state.activity) or "暂无智能体活动。")
                 )
 
             def _timeline_text(self) -> str:
-                lines = ["Phase Timeline"]
-                for phase_id, copy in PHASE_DISPLAY.items():
-                    phase = self.state.phases.get(phase_id, {})
+                lines = ["当前阶段"]
+                for row in visible_phase_rows(self.state):
                     lines.append(
-                        f"{phase.get('status', 'pending'):>10}  {copy.title}\n"
-                        f"            {_short_phase_description(copy.description)}"
+                        f"{row.number}. {row.title}｜{row.status}\n"
+                        f"   {row.description}"
                     )
                 return "\n".join(lines)
 
@@ -235,9 +288,9 @@ class SeamDashboardApp:
 
             def action_help(self) -> None:
                 self.query_one("#current", Static).update(
-                    "Shortcuts\n\nq: quit dashboard view\n"
-                    "l/s: focus activity panel\n?: show this help\n"
-                    "Migration continues after dashboard view exits."
+                    "快捷键\n\nq: 退出仪表盘视图\n"
+                    "l/s: 聚焦智能体活动面板\n?: 显示帮助\n"
+                    "退出仪表盘后，迁移任务仍会继续运行。"
                 )
 
         _TextualDashboard().run()
