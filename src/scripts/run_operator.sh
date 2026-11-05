@@ -42,6 +42,12 @@ agent writes solution.json, leaving the original benchmark task unchanged.
 USAGE
 }
 
+# Default runtime is the dsh native workflow engine. The OpenCode launcher below
+# stays available as an explicit fallback: SEAM_RUNTIME=opencode.
+if [[ "${SEAM_RUNTIME:-dsh}" != "opencode" ]]; then
+    exec bash "$SCRIPT_DIR/run_operator_dsh.sh" "$@"
+fi
+
 if [[ $# -eq 1 && ( "$1" == "-h" || "$1" == "--help" ) ]]; then
     usage
     exit 0

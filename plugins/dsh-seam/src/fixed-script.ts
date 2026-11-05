@@ -1,5 +1,6 @@
 import { conditionDecision, pythonString, resolve, truth } from './expressions.js'
 import { failureEvidence } from './evidence.js'
+import { historyRecord } from './history.js'
 import type { Data, Loop, Phase, Result, Scope, Workflow } from './types.js'
 
 interface Input { workflow: Workflow; context: Data; token: string }
@@ -92,7 +93,7 @@ export async function run(input: Input, agent: AgentCall, phaseEvent: (title: st
         iterationStatus = result.status
         if (result.status === 'failure' && (item.on_failure === 'break' || item.type === 'dispatch' || result.output.validation_errors)) break
       }
-      current.loop_history.push({ iteration, status: iterationStatus, outputs: JSON.parse(JSON.stringify(current.step_outputs)) })
+      current.loop_history.push({ iteration, status: iterationStatus, outputs: historyRecord(iteration, iterationStatus, current.step_outputs) })
       await artifact(`${step.id}-iteration`, { ...current.loop_state, history: current.loop_history })
       await checkpoint(step.id, current)
       if (iterationStatus === 'failure' && current.step_outputs.dispatch_error) return { status: 'failure', output: { ...current.loop_state, history: current.loop_history } }

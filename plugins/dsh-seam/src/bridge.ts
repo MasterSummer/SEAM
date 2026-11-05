@@ -31,6 +31,8 @@ export class DomainBridge {
   async render(execution: Execution): Promise<string> {
     const response = await this.call('render', execution, { agent_skills: this.options.agentSkills?.[execution.phase.agent ?? ''] ?? {} })
     if (typeof response.prompt !== 'string') throw new Error('Prompt bridge returned no prompt')
+    const warnings = Array.isArray(response.warnings) ? response.warnings.map(String) : []
+    if (warnings.length) console.warn(`[seam] ${warnings.join('; ')}`)
     return response.prompt
   }
   async validate(execution: Execution, result: Result): Promise<Result> {

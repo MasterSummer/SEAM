@@ -165,7 +165,7 @@ sub_workflows:
         type: llm
         agent: main_engineer
         prompt_template: "phase_3_custom_op_prepare"
-        timeout: 2400  # qwen3.8-27b 慢，从 1200 提到 2400（40 分钟）
+        timeout: 7200  # qwen3.8-27b 慢，从 2400 提到 7200（60 分钟，对齐 analyze 阶段）
         condition: >-
           ${loop_state.operator_artifact_state.rebuild_required} == true
         output_as: "operator_preparation"
@@ -248,7 +248,7 @@ sub_workflows:
         type: llm
         agent: operator_fixer
         prompt_template: "repair_operator_fixer_kernelbench_ascendc"
-        timeout: 2400  # qwen3.8-27b 慢，从 1200 提到 2400（40 分钟）
+        timeout: 7200  # qwen3.8-27b 慢，从 2400 提到 7200（60 分钟）：实测 fixer 会话在 2430s 时仍在收敛，2400s 上限低于真实时长
         condition: >-
           ${loop_state.operator_passed} != true
           and ${loop_state.evaluation_classification.repair_role} != 'operator_environment_fixer'

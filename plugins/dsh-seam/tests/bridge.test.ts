@@ -82,7 +82,7 @@ test('evaluation cannot consume missing or stale candidates', async context => {
   assert.equal((await call('operator_kernelbench_eval')).output.failure_category, 'stale_candidate')
 })
 
-test('prompt bundles round artifacts and suggestions together, with an explicit size failure', async context => {
+test('prompt bundles round artifacts and suggestions; the byte budget is advisory', async context => {
   const { root, bridge, execution } = await fixture(context)
   execution.phase = { id: 'repair', agent: 'fixer', prompt_template: 'repair_operator_fixer_kernelbench_ascendc' }
   execution.scope.loop_history = [{ iteration: 1, outputs: { artifact: { sha256: 'fixture-sha' }, error_analysis: { recommendation: 'inspect the actual source types' } } }]
@@ -90,7 +90,8 @@ test('prompt bundles round artifacts and suggestions together, with an explicit 
   assert.ok(prompt.includes('fixture-sha'))
   assert.ok(prompt.includes('inspect the actual source types'))
   const limited = new DomainBridge({ repository, python, outputDir: root, maxPromptBytes: 10 })
-  await assert.rejects(limited.render(execution), /exceeds max_prompt_bytes/)
+  const oversized = await limited.render(execution)
+  assert.ok(oversized.includes('fixture-sha'), 'an over-budget prompt is still rendered and sent')
 })
 
 test('project prompt rendering receives generic phase, project, mapped input and prior state', async context => {

@@ -191,9 +191,22 @@ def render(request):
     prompt += "\n\nReturn one JSON object as the final response; do not wrap it in commentary."
     if phase.get("output_schema"):
         prompt += "\nExpected output contract:\n" + text(phase["output_schema"])
-    if len(prompt.encode("utf-8")) > request["max_prompt_bytes"]:
-        raise ValueError("Rendered prompt exceeds max_prompt_bytes; evidence was not silently truncated")
-    return {"prompt": prompt, "skills": bundle.names, "warnings": bundle.warnings}
+    # The byte budget is advisory only: the prompt is always sent, and an
+    # over-budget size is reported back instead of failing the phase before the
+    # model sees it. Provider context limits remain the real boundary.
+    prompt_bytes = len(prompt.encode("utf-8"))
+    warnings = list(bundle.warnings)
+    budget = request.get("max_prompt_bytes")
+    if isinstance(budget, int) and budget > 0 and prompt_bytes > budget:
+        warnings.append(
+            f"prompt is {prompt_bytes} bytes, above the advisory max_prompt_bytes={budget}"
+        )
+    return {
+        "prompt": prompt,
+        "skills": bundle.names,
+        "warnings": warnings,
+        "prompt_bytes": prompt_bytes,
+    }
 
 
 def validate(request):

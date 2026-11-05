@@ -32,10 +32,23 @@ DEFAULT_POLICY: dict[str, list[str]] = {
 
 
 def load_operator_constraints(raw: str | None) -> dict[str, Any]:
-    """Load a JSON policy, merging it over the safe built-in policy."""
+    """Load a JSON policy, merging it over the safe built-in policy.
+
+    Accepts either a raw JSON string or a file path to a JSON file.
+    """
     policy: dict[str, Any] = {key: list(value) for key, value in DEFAULT_POLICY.items()}
     if not raw or not raw.strip():
         return policy
+    # Detect when raw is a file path to an existing .json file and read its content
+    if not raw.strip().startswith("{"):
+        candidate = Path(raw.strip())
+        if candidate.is_file() and candidate.suffix == ".json":
+            try:
+                raw = candidate.read_text(encoding="utf-8")
+            except (OSError, UnicodeDecodeError) as exc:
+                raise ValueError(
+                    f"OPERATOR_CONSTRAINTS path {candidate} could not be read: {exc}"
+                ) from exc
     try:
         parsed = json.loads(raw)
     except json.JSONDecodeError as exc:

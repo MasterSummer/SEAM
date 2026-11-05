@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto'
 import { realpath } from 'node:fs/promises'
 import { conditionDecision, pythonString, resolve, truth } from './expressions.js'
 import { failureEvidence } from './evidence.js'
+import { historyRecord } from './history.js'
 import { executeWorkflowHooks } from './hooks.js'
 import { RunStore } from './store.js'
 import type { Data, Execution, Handler, Loop, Phase, Result, RunSnapshot, Runtime, Scope, Workflow } from './types.js'
@@ -273,7 +274,7 @@ export class WorkflowEngine {
         iterationStatus = result.status
         if (result.status === 'failure' && (step.on_failure === 'break' || step.type === 'dispatch' || result.output.validation_errors)) break
       }
-      scope.loop_history.push({ iteration, status: iterationStatus, outputs: structuredClone(scope.step_outputs) })
+      scope.loop_history.push({ iteration, status: iterationStatus, outputs: historyRecord(iteration, iterationStatus, scope.step_outputs) })
       await this.options.store.artifact(`${phase.id}-iteration`, { ...scope.loop_state, history: scope.loop_history })
       if (iterationStatus === 'failure' && scope.step_outputs.dispatch_error) return { status: 'failure', output: { ...scope.loop_state, history: scope.loop_history } }
       const stop = await this.stop(loop, scope)

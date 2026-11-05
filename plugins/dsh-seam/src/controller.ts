@@ -128,6 +128,23 @@ export class SeamController {
     try { await chat.runtime.dispose() }
     finally { try { await chat.release() } finally { this.chats.delete(runId) } }
   }
+  /** Block until the owned run settles, or until the caller's budget expires.
+
+   * The launcher drives a run with a single `wait` instead of LLM polling: the
+   * tool result is the terminal snapshot, so the workflow cannot be cancelled by
+   * a model that decides it has polled enough. A timeout returns the current
+   * snapshot so the caller can wait again. */
+  async wait(runId: string, timeoutMs: number): Promise<RunSnapshot | { status: 'starting' }> {
+    const active = this.active.get(runId)
+    if (!active) return new RunStore(this.config.runRoot, runId).read()
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const timeout = new Promise<'timeout'>(resolve => { timer = setTimeout(() => resolve('timeout'), timeoutMs); timer.unref?.() })
+    try {
+      const settled = active.done.then(() => 'done' as const, () => 'done' as const)
+      await Promise.race([settled, timeout])
+    } finally { if (timer) clearTimeout(timer) }
+    return this.status(runId)
+  }
   async dispose(): Promise<void> {
     this.closing = true
     this.lifecycle.abort(new Error('SEAM plugin disposed'))

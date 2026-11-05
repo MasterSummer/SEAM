@@ -57,6 +57,23 @@ Read scope:
   implementations, and `/home/yiding/opencode_home/**`. Do not copy a finished
   solution; derive from the reference and AscendC public API only.
 
+## Common Errors (verified on 910B3, CANN 8.3.RC1)
+
+### Device hang: unaligned tail `DataCopy`
+
+- Symptom: one workload never finishes; evaluation ends in `timeout` /
+  `no_trace_timeout`; the same shape hangs on every run; no error line is printed.
+- Cause: GM↔UB `DataCopy` moves 32-byte blocks. A copy whose byte length is not a
+  multiple of 32 enters an undefined path: the copy never completes and the AI
+  core waits forever (no exception, no timeout of its own).
+- Example (fp32, `TILE_LENGTH=4096`): tail 1984 elems = 7936 B (÷32 ok) passes;
+  tail 4079 elems = 16316 B (÷32 ≠ 0) hangs.
+- Fix: use `DataCopyPad` for the last tile, or pad the tile to a 32-byte multiple
+  and mask the tail in compute. Never call raw `DataCopy` with an arbitrary tail
+  element count.
+- Pre-flight check: for every dtype/shape family,
+  `(tail_elems * sizeof(T)) % 32 == 0`, or the tail path uses `DataCopyPad`.
+
 ## Common Placeholders
 
 The examples use placeholders to avoid binding generic notes to one site or
@@ -355,10 +372,19 @@ GENERAL; never tailor them to a single operator.
 - `const float x;` members with no initializer are errors — always initialize.
 
 ### DataCopy
-- `DataCopy(dstLocal, srcGm[offset], count)` blob copy.
+- `DataCopy(dstLocal, srcGm[offset], count)` blob copy. Its byte length must be a
+  multiple of 32; never use it for an arbitrary tail (see Common Errors above).
 - `DataCopyPad(dstLocal, srcGm, {blockCount, blockLen, srcStride, dstStride, rsv},
   padParms)` for padded/tail tiles; `DataCopyExtParams` field order is
   `{blockCount, blockLen, srcStride, dstStride, rsv}` (blockLen in BYTES).
+- Concrete tail pattern (works for fp32/fp16/bf16; no over-read, no over-write):
+  ```cpp
+  DataCopyExtParams p(1, tailLen * sizeof(T), 0, 0, 0);
+  DataCopyPadExtParams<T> pad(false, 0, 0, T(0));
+  DataCopyPad(xLocal, xGm[offset], p, pad);   // GM -> UB, exact length, UB padded
+  // compute only tailLen elements
+  DataCopyPad(yGm[offset], yLocal, p);        // UB -> GM, exact length
+  ```
 
 ### Includes / entry
 - Device file: `#include "kernel_operator.h"` + `using namespace AscendC;`.

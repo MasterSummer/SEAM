@@ -165,10 +165,16 @@ def run_kernelbench_eval(
     profile_dir.mkdir(parents=True, exist_ok=True)
     stdout_path = traces.with_suffix(".stdout.log")
     stderr_path = traces.with_suffix(".stderr.log")
+    # The runner's per-workload budget must expire before the outer subprocess
+    # deadline. Otherwise the outer kill wins the race and the CLI never returns
+    # the timeout traces it already knows how to build, leaving no evidence.
+    workload_timeout = max(10, int(timeout * 0.75))
+    if workload_timeout >= timeout:
+        workload_timeout = max(1, timeout - 5)
     command = [
         "uv", "run", "npu-kernelbench", "eval", str(task),
         "--solution", str(solution_path), "--runner", "persistent",
-        "--timeout", str(timeout), "-o", str(traces), "--verbose",
+        "--timeout", str(workload_timeout), "-o", str(traces), "--verbose",
         "--work-dir", str(work_dir), "--profile-dir", str(profile_dir),
     ]
     runtime_env = {**os.environ, "PYTHONUNBUFFERED": "1"}
@@ -216,6 +222,7 @@ def run_kernelbench_eval(
         "pid": process.pid,
         "command": command,
         "timeout_seconds": timeout,
+        "workload_timeout_seconds": workload_timeout,
         "cwd": str(root),
         "traces_path": str(traces),
         "runtime_env_file": str(runtime_env_file) if runtime_env_file else "",
@@ -474,6 +481,7 @@ def evaluate_and_summarize_operator(
         timeout=timeout,
         runtime_env_file=evaluation_env_file,
     )
+    _cleanup_evaluation_temp(evaluation_env_file)
     result = dict(process)
     result.update(
         {
@@ -542,6 +550,23 @@ def evaluate_and_summarize_operator(
     return result
 
 
+def _cleanup_evaluation_temp(env_file: Path) -> None:
+    """Best-effort removal of one evaluation's managed temp tree."""
+    try:
+        tmp_dir: Path | None = None
+        for line in env_file.read_text(encoding="utf-8").splitlines():
+            if line.startswith("TMPDIR="):
+                tmp_dir = Path(line.split("=", 1)[1].strip())
+                break
+        if tmp_dir is None or not tmp_dir.is_dir():
+            return
+        # Only remove paths this module created; never a user-supplied TMPDIR.
+        if tmp_dir.parent.name == "seam-kb":
+            shutil.rmtree(tmp_dir, ignore_errors=True)
+    except OSError:
+        return
+
+
 def _prepare_evaluation_runtime(
     evaluation_dir: Path, base_env_file: str | Path | None
 ) -> Path:
@@ -573,10 +598,14 @@ def _prepare_evaluation_runtime(
     tmp_dir = runtime_root / "tmp"
     if short_tmp_root:
         # Ascend TBE/AOE opens AF_UNIX sockets below TMPDIR, whose sun_path is
-        # capped at ~107 bytes; the nested evaluation path is too long for it.
-        tmp_dir = Path(short_tmp_root).expanduser() / evaluation_dir.name[:60]
+        # capped at ~107 bytes. Keep the whole path short by truncating the
+        # evaluation id to the remaining budget instead of relocating to /tmp.
+        root = Path(short_tmp_root).expanduser()
+        budget = max(8, 69 - len(str(root)))
+        tmp_dir = root / evaluation_dir.name[:budget]
     if len(str(tmp_dir)) > 70:
-        tmp_dir = Path(tempfile.gettempdir()) / "seam-kb" / evaluation_dir.name[:60]
+        # Last resort stays off the shared /tmp: use short-lived shared memory.
+        tmp_dir = Path("/dev/shm") / "seam-kb" / evaluation_dir.name[:24]
     for directory in (tmp_dir, cache_dir, staging_dir):
         directory.mkdir(parents=True, exist_ok=True)
     env.update(

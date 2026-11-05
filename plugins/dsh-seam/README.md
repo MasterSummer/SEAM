@@ -74,7 +74,7 @@ provider/model 应是该 dsh profile 已配置的名称；凭证与 API 地址�
 - `roleTools` 每个角色必须显式设置，`[]` 表示无全局工具；不要给 worker 角色开放 `seam_workflow` 以递归启动任务。
 - `roleOptions` 透传给 dsh agent 创建/恢复选项，目前示例只指定 provider/model；聊天恢复时也会应用当前配置。
 - `defaultTimeoutSeconds` 是整个 phase 的预算，包含 prompt、LLM 修正和 validator。若 builtin 内层评测预算更长，外层预算也必须相应增大。
-- `maxPromptBytes` 是最终 prompt 的 UTF-8 字节上限，不是模型 token 上限；需要结合 provider 的上下文容量设置。
+- `maxPromptBytes` 只是**建议阈值**，不阻断执行：超出时 bridge 仍返回 prompt，并计入 `warnings`（host 日志可见）；真正的边界是 provider 的上下文窗口。它不是模型 token 上限，二者不可直接换算。
 
 工具 allowlist **不是安全沙箱**：开放 `bash` 就允许相应 shell 权限。cwd 只校验 session workspace，不限制进程不能访问其他路径。作用域工具、PTC transport、MCP 等能力需要另行审计；本实现不能宣称已经封闭全部能力通道。
 

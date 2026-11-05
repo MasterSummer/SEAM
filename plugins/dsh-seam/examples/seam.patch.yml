@@ -16,7 +16,7 @@
         workflows:
           kernelbench: src/workflows/npu_kernelbench_custom_op.yaml
         defaultTimeoutSeconds: 3600
-        maxPromptBytes: 200000
+        maxPromptBytes: 262144
         roleTools:
           main_engineer: [read, write, edit, glob, grep, bash]
           error_analyzer: [read, glob, grep]
