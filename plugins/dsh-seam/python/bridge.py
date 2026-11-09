@@ -226,14 +226,21 @@ def render(request):
                 prompt += "\nExpected output contract:\n" + text(phase["output_schema"])
             prompt_size = len(prompt.encode("utf-8"))
 
-        # Strategy 3: Still over budget - fail with diagnostic
+        # Strategy 3: still over budget -- never fail here. The provider
+        # context window is the real boundary, so the oversize is reported as
+        # an advisory warning and the prompt is still sent.
         if prompt_size > max_size:
-            raise ValueError(
-                f"Prompt {prompt_size} bytes exceeds {max_size} after degradation. "
-                f"Applied: {warnings}. Phase: {phase['id']}, Iteration: {state.get('iteration', 0)}"
+            warnings.append(
+                f"prompt is {prompt_size} bytes, above the advisory "
+                f"max_prompt_bytes={max_size} after degradation"
             )
 
-    return {"prompt": prompt, "skills": bundle.names, "warnings": warnings}
+    return {
+        "prompt": prompt,
+        "skills": bundle.names,
+        "warnings": warnings,
+        "prompt_bytes": prompt_size,
+    }
 
 
 def validate(request):
