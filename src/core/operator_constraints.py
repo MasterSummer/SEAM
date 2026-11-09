@@ -36,6 +36,18 @@ def load_operator_constraints(raw: str | None) -> dict[str, Any]:
     policy: dict[str, Any] = {key: list(value) for key, value in DEFAULT_POLICY.items()}
     if not raw or not raw.strip():
         return policy
+    # A file path is accepted as well as a raw JSON string. The launcher passes
+    # docs/operator_constraints.example.json as a path, so parsing it as JSON
+    # would fail the preflight for every operator.
+    if not raw.strip().startswith("{"):
+        candidate = Path(raw.strip())
+        if candidate.is_file() and candidate.suffix == ".json":
+            try:
+                raw = candidate.read_text(encoding="utf-8")
+            except (OSError, UnicodeDecodeError) as exc:
+                raise ValueError(
+                    f"OPERATOR_CONSTRAINTS path {candidate} could not be read: {exc}"
+                ) from exc
     try:
         parsed = json.loads(raw)
     except json.JSONDecodeError as exc:

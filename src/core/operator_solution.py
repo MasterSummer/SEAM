@@ -96,6 +96,23 @@ def initialize_operator_solution(
     return result
 
 
+def _published_source_path(path: Path, task_dir: Path, root: Path) -> str:
+    """Path a packed solution should declare for a staged source file.
+
+    KernelBench stages ``solution.sources[*].path`` under ``<work>/sources`` and
+    loads the entry point from there. Candidates are authored with paths relative
+    to the task root (the prompt prefers ``sources/``), so strip that prefix when
+    the file really lives under ``<task_dir>/sources``; otherwise keep the path
+    relative to the specification directory, which is the legacy layout.
+    """
+    resolved = path.resolve()
+    sources_root = (task_dir.expanduser().resolve() / "sources")
+    try:
+        return resolved.relative_to(sources_root).as_posix()
+    except ValueError:
+        return resolved.relative_to(root).as_posix()
+
+
 def pack_operator_solution(solution: str | Path, task_dir: str | Path) -> dict[str, Any]:
     """Pack declared source files atomically, preserving the old solution on failure."""
     requested_path = Path(solution).expanduser()
@@ -126,9 +143,27 @@ def pack_operator_solution(solution: str | Path, task_dir: str | Path) -> dict[s
         before = [path.read_bytes() for path in paths]
         packed = dict(spec)
         packed["sources"] = [
-            {**entry, "content": content.decode("utf-8")}
-            for entry, content in zip(spec["sources"], before)
+            {
+                **entry,
+                "path": _published_source_path(path, Path(task_dir), solution_path.parent),
+                "content": content.decode("utf-8"),
+            }
+            for entry, path, content in zip(spec["sources"], paths, before)
         ]
+        spec_block = packed.get("spec")
+        if isinstance(spec_block, dict):
+            entry_point = spec_block.get("entry_point")
+            if isinstance(entry_point, str) and entry_point:
+                entry_file, _, symbol = entry_point.partition("::")
+                entry_path = solution_path.parent / entry_file
+                if entry_path.is_file():
+                    published = _published_source_path(
+                        entry_path, Path(task_dir), solution_path.parent
+                    )
+                    packed["spec"] = {
+                        **spec_block,
+                        "entry_point": f"{published}::{symbol}" if symbol else published,
+                    }
         if (
             before != [path.read_bytes() for path in paths]
             or spec != _read_spec(spec_path)
@@ -143,7 +178,7 @@ def pack_operator_solution(solution: str | Path, task_dir: str | Path) -> dict[s
                 "solution_sha256": hashlib.sha256(payload).hexdigest(),
                 "source_sha256": {
                     entry["path"]: hashlib.sha256(content).hexdigest()
-                    for entry, content in zip(spec["sources"], before)
+                    for entry, content in zip(packed["sources"], before)
                 },
             }
         )
