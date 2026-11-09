@@ -75,6 +75,25 @@ barrier as a universal fix. Include empty, smallest, largest and non-aligned
 cases when they occur in the workload. A timeout or missing trace alone is not
 proof of an out-of-bounds access.
 
+### Copy alignment (hard rule)
+
+GM↔UB `DataCopy` moves data in 32-byte blocks, so every copy's byte length must
+be a multiple of 32. A tail tile whose element count is not a multiple of 8
+(fp32) or 16 (fp16/bf16) makes `DataCopy` wait forever: the device hangs with no
+error and the evaluator only reports a timeout. Use `DataCopyPad` for the last
+tile, or pad the tile to a 32-byte multiple and mask the tail in compute. Before
+finishing, check every dtype/shape family: `(tail_elems * sizeof(T)) % 32 == 0`,
+or confirm the tail path uses `DataCopyPad`.
+
+Concrete tail pattern (no over-read, no over-write):
+
+```cpp
+DataCopyExtParams p(1, tailLen * sizeof(T), 0, 0, 0);
+DataCopyPadExtParams<T> pad(false, 0, 0, T(0));
+DataCopyPad(xLocal, xGm[offset], p, pad);   // GM -> UB, exact length
+DataCopyPad(yGm[offset], yLocal, p);        // UB -> GM, exact length
+```
+
 ## Required Actions
 
 Create or update the real Ascend C candidate implementation in the operator workspace.

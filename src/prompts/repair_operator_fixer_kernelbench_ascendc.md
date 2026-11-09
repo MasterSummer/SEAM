@@ -157,6 +157,15 @@ API allowlist remains binding and is separate from failure diagnosis.
   excerpt is insufficient, and explain the missing evidence being recovered.
 - Work sequentially: do not issue parallel tool calls. Prefer one inspection
   call, one edit call, and one validation call.
+- If the failure is a hang (evaluation timeout with no trace for the workload),
+  suspect an unaligned tail copy before anything else: `DataCopy` moves 32-byte
+  blocks, so a tail whose byte length is not a multiple of 32 never completes.
+  Check `(tail_elems * sizeof(T)) % 32` for every dtype/shape and switch the tail
+  to `DataCopyPad` (or pad + mask) before making other edits. Pattern:
+  `DataCopyExtParams p(1, tailLen * sizeof(T), 0, 0, 0);`
+  `DataCopyPadExtParams<T> pad(false, 0, 0, T(0));`
+  `DataCopyPad(xLocal, xGm[offset], p, pad);` for GM→UB and
+  `DataCopyPad(yGm[offset], yLocal, p);` for UB→GM.
 - If the failure is environment, dependency, or task-schema related rather than
   an operator implementation issue, state the handoff clearly instead of making
   speculative kernel edits.
