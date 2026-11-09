@@ -19,6 +19,7 @@ export class DomainBridge {
   private async call(action: string, execution: Execution, extra: Data = {}): Promise<Data> {
     const output = await runProcess(this.options.python, [join(this.options.repository, 'plugins/dsh-seam/python/bridge.py')], {
       cwd: execution.workspace, signal: execution.signal,
+      maxBytes: 128 * 1024 * 1024,
       input: { action, execution: { ...execution, signal: undefined }, output_dir: this.options.outputDir, max_prompt_bytes: this.options.maxPromptBytes, ...extra },
     })
     return JSON.parse(output) as Data
