@@ -45,9 +45,9 @@ test('summarizeHistory keeps recent + first when over limit', () => {
   const summarized = summarizeHistory(history, 5)
 
   assert.strictEqual(summarized.length, 5)
-  assert.strictEqual(summarized[0].iteration, 0, 'Should keep first iteration')
-  assert.strictEqual(summarized[1].iteration, 6, 'Should keep recent iterations')
-  assert.strictEqual(summarized[4].iteration, 9, 'Should keep last iteration')
+  assert.strictEqual(summarized[0]!.iteration, 0, 'Should keep first iteration')
+  assert.strictEqual(summarized[1]!.iteration, 6, 'Should keep recent iterations')
+  assert.strictEqual(summarized[4]!.iteration, 9, 'Should keep last iteration')
 })
 
 test('summarizeHistory returns original when under limit', () => {
