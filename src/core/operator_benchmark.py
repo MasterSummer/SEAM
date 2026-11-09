@@ -165,10 +165,15 @@ def run_kernelbench_eval(
     profile_dir.mkdir(parents=True, exist_ok=True)
     stdout_path = traces.with_suffix(".stdout.log")
     stderr_path = traces.with_suffix(".stderr.log")
+    # The runner's per-workload budget must expire before the outer subprocess
+    # deadline; otherwise the outer kill wins and no evidence is written.
+    workload_timeout = max(10, int(timeout * 0.75))
+    if workload_timeout >= timeout:
+        workload_timeout = max(1, timeout - 5)
     command = [
         "uv", "run", "npu-kernelbench", "eval", str(task),
         "--solution", str(solution_path), "--runner", "persistent",
-        "--timeout", str(timeout), "-o", str(traces), "--verbose",
+        "--timeout", str(workload_timeout), "-o", str(traces), "--verbose",
         "--work-dir", str(work_dir), "--profile-dir", str(profile_dir),
     ]
     runtime_env = {**os.environ, "PYTHONUNBUFFERED": "1"}
@@ -182,6 +187,11 @@ def run_kernelbench_eval(
                     continue
                 key, value = line.split("=", 1)
                 runtime_env[key.strip()] = value.strip()
+    # The official runner overwrites ASCEND_RT_VISIBLE_DEVICES with the logical
+    # npu_id, so pass the physical id we are pinned to.
+    visible_device = runtime_env.get("ASCEND_RT_VISIBLE_DEVICES", "").strip()
+    if visible_device and "," not in visible_device and visible_device.isdigit() and "--npu-ids" not in command:
+        command.extend(["--npu-ids", visible_device])
     lock_path = _evaluator_lock_path(root, runtime_env)
     lock_file = lock_path.open("a+", encoding="utf-8")
     fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
@@ -216,6 +226,7 @@ def run_kernelbench_eval(
         "pid": process.pid,
         "command": command,
         "timeout_seconds": timeout,
+        "workload_timeout_seconds": workload_timeout,
         "cwd": str(root),
         "traces_path": str(traces),
         "runtime_env_file": str(runtime_env_file) if runtime_env_file else "",
@@ -513,6 +524,14 @@ def evaluate_and_summarize_operator(
     ) if (Path(task_dir) / "workload.jsonl").is_file() else 0
     result["expected_workloads"] = expected_workloads
     result["trace_complete"] = result.get("total_workloads", 0) == expected_workloads
+    if expected_workloads and not result["trace_complete"]:
+        # A partial batch (e.g. the first workload hung) must never look like
+        # a 100% pass over the few workloads that did run.
+        result["operator_passed"] = False
+        result["operator_pass_rate"] = 0.0
+        result["workload_pass_rate"] = (
+            result.get("passed_workloads", 0) / expected_workloads
+        )
 
     # Workload execution state tracking
     if traces_path.is_file():
