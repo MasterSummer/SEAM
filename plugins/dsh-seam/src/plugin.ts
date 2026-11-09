@@ -39,7 +39,7 @@ export function apply(ctx: Context, config: ControllerConfig): void {
       removeService = ctx.provide('seamWorkflow', controller)
       removeTool = tools.register({
         name: 'seam_workflow', description: 'Start or inspect a configured SEAM workflow; restore_chat restores role chats only, never workflow execution.',
-        parameters: { type: 'object', required: ['action', 'runId'], additionalProperties: false, properties: { action: { type: 'string', enum: ['run', 'status', 'cancel', 'restore_chat', 'close_chat'] }, runId: { type: 'string' }, workflow: { type: 'string' }, workspace: { type: 'string' }, context: { type: 'object', additionalProperties: true } } },
+        parameters: { type: 'object', required: ['action', 'runId'], additionalProperties: false, properties: { action: { type: 'string', enum: ['run', 'status', 'wait', 'cancel', 'restore_chat', 'close_chat'] }, runId: { type: 'string' }, timeoutSeconds: { type: 'number' }, workflow: { type: 'string' }, workspace: { type: 'string' }, context: { type: 'object', additionalProperties: true } } },
         output: { schema: { type: 'object', additionalProperties: true }, render: (_args, value) => [{ type: 'text', text: JSON.stringify(value) }] },
         execute: async (input: unknown, exec) => {
           const args = input as Data
@@ -50,6 +50,7 @@ export function apply(ctx: Context, config: ControllerConfig): void {
               if (!exec.agent) throw new Error('seam_workflow run requires a calling dsh Agent')
               return controller.run({ runId: args.runId, workflow: args.workflow, workspace: args.workspace, context: args.context as Data }, exec.agent)
             case 'status': return controller.status(args.runId)
+            case 'wait': return await controller.wait(args.runId, Math.min(Math.max(Number(args.timeoutSeconds ?? 43200), 1), 86400) * 1000)
             case 'cancel': return controller.cancel(args.runId)
             case 'restore_chat': return { sessions: await controller.restoreChat(args.runId) }
             case 'close_chat': await controller.closeChat(args.runId); return { status: 'closed' }

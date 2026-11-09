@@ -119,6 +119,17 @@ export class SeamController {
     active.engine.cancel()
     return active.done
   }
+  async wait(runId: string, timeoutMs: number): Promise<RunSnapshot | { status: 'starting' }> {
+    const active = this.active.get(runId)
+    if (!active) return new RunStore(this.config.runRoot, runId).read()
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const timeout = new Promise<'timeout'>(resolve => { timer = setTimeout(() => resolve('timeout'), timeoutMs); timer.unref?.() })
+    try {
+      const settled = active.done.then(() => 'done' as const, () => 'done' as const)
+      await Promise.race([settled, timeout])
+    } finally { if (timer) clearTimeout(timer) }
+    return this.status(runId)
+  }
   restoreChat(runId: string): Promise<Record<string, string>> {
     return this.track(async () => {
       if (this.active.has(runId) || this.chats.has(runId)) throw new Error('Run is already owned')
