@@ -79,6 +79,7 @@ phases:
     runtime_skills:
       include:
         - cuda-custom-op-to-npu-custom-op
+        - npu-kernelbench-numerics
       inject_full: false
       missing: error
     input_mapping:
@@ -182,6 +183,7 @@ sub_workflows:
         runtime_skills:
           include:
             - cuda-custom-op-to-npu-custom-op
+            - npu-kernelbench-numerics
           inject_full: false
           missing: error
         on_failure: continue
@@ -256,7 +258,8 @@ sub_workflows:
         runtime_skills:
           include:
             - cuda-custom-op-to-npu-custom-op
-          inject_full: false
+            - npu-kernelbench-numerics
+          inject_full: true
           missing: error
         input_mapping:
           operator_constraints: "${loop_vars.OPERATOR_CONSTRAINTS}"

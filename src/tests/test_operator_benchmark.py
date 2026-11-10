@@ -75,7 +75,7 @@ def test_kernelbench_agents_share_path_only_documentation() -> None:
         phase for phase in workflow.phases if phase.id == "phase_2_operator_analysis"
     )
     assert analysis.runtime_skills is not None
-    assert analysis.runtime_skills.include == ["cuda-custom-op-to-npu-custom-op"]
+    assert analysis.runtime_skills.include == ["cuda-custom-op-to-npu-custom-op", "npu-kernelbench-numerics"]
     assert analysis.runtime_skills.inject_full is False
     assert analysis.runtime_skills.missing == "error"
 
@@ -86,7 +86,8 @@ def test_kernelbench_agents_share_path_only_documentation() -> None:
     for phase_id in ("prepare_operator", "fix_operator"):
         config = phases[phase_id]["runtime_skills"]
         assert config["include"] == analysis.runtime_skills.include
-        assert config["inject_full"] is False
+        # The fixer gets the full numerical rules; prepare only the summary.
+        assert config["inject_full"] is (phase_id == "fix_operator")
         assert config["missing"] == "error"
 
 

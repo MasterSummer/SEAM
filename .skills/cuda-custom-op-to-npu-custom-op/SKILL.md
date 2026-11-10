@@ -14,9 +14,9 @@ in the user's current request or in the target project's own plan.
 If the task's `solution.json` uses `build_method: "cmake"` (KernelBench), copy the
 structure of KernelBench's own official sample and build template:
 
-- Sample (canonical, correct): `/home/yiding/bench/npu-kernelbench/tests/samples/vector_add_ascendc_cmake/`
+- Sample (canonical, correct): `/home/yiding/npu-kernelbench/tests/samples/vector_add_ascendc_cmake/`
   - `op_kernel/add_custom.cpp`, `op_host/my_add.cpp`, `op_host/utils.h`, `main.py`
-- Build skeleton: `/home/yiding/bench/npu-kernelbench/src/npu_kernelbench/builder/templates/CMakeLists.txt.j2`
+- Build skeleton: `/home/yiding/npu-kernelbench/src/npu_kernelbench/builder/templates/CMakeLists.txt.j2`
   (it compiles `op_kernel/**` into the kernel lib, links `torch_npu/ascendcl/tiling_api/register/platform`,
   and CANN's `ascendc.cmake` generates the `aclrtlaunch_*.h` headers)
 

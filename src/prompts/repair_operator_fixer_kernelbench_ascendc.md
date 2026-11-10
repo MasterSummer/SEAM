@@ -7,7 +7,11 @@ into project migration or dataset orchestration.
 ## Reference and Candidate Evidence
 
 Use `definition.json` as the contract and the reference as the comparison
-baseline. Failure patterns, TODOs or missing traces alone do not establish a
+baseline. The evaluation output now includes `failing_workloads`: a compact list
+of index, shape/dtype/scalar inputs, correctness metrics and error text for the
+workloads that actually failed. Start from those cases instead of guessing.
+If `reference_invalid` is true, the golden baseline failed and the candidate was
+never judged: do not modify the candidate; report the reference problem. Failure patterns, TODOs or missing traces alone do not establish a
 reference defect or a candidate bug. Tie each suspected defect to the exact
 source branch, contract and affected workload. Do not edit the reference or
 weaken acceptance criteria. If an external reference issue prevents validation,

@@ -541,7 +541,7 @@ def evaluate_and_summarize_operator(
             status = _status(trace)
             workload_states.append({
                 "index": idx,
-                "uuid": trace.get("uuid", ""),
+                "uuid": (trace.get("workload") or {}).get("uuid", ""),
                 "status": status,
                 "executed": True
             })
@@ -558,6 +558,11 @@ def evaluate_and_summarize_operator(
         result["workload_states"] = workload_states
         result["executed_count"] = len(traces)
         result["not_run_count"] = expected_workloads - len(traces)
+
+        failing, failing_count = _failing_workload_digest(traces)
+        result["failing_workload_count"] = failing_count
+        result["failing_workloads"] = failing[:20]
+        result["first_failure_workload"] = failing[0]["index"] if failing else ""
     else:
         result["workload_states"] = []
         result["executed_count"] = 0
@@ -577,6 +582,10 @@ def evaluate_and_summarize_operator(
     manifest_path = evaluation_dir / "failure_manifest.json"
     manifest_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     result["failure_manifest_path"] = str(manifest_path)
+    if str(manifest.get("evaluation_scope") or "") == "reference":
+        # The golden baseline itself failed; the candidate was never judged.
+        result["reference_invalid"] = True
+        result["failure_category"] = result.get("failure_category") or "invalid_reference"
     history_path = Path(output_dir).expanduser().resolve() / "iteration_history.json"
     history = []
     if history_path.is_file():
@@ -1080,6 +1089,126 @@ def configure_operator_runtime(
         json.dumps(result, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
     )
     return result
+def _workload_shape(spec: Any) -> list[int]:
+    if not isinstance(spec, dict):
+        return []
+    shape = spec.get("shape")
+    if not isinstance(shape, list):
+        return []
+    out: list[int] = []
+    for value in shape:
+        if isinstance(value, bool) or not isinstance(value, (int, float)) or int(value) != value:
+            return []
+        out.append(int(value))
+    return out
+
+
+def _workload_numel(shape: list[int]) -> int:
+    total = 1
+    for value in shape:
+        total *= value
+    return total
+
+
+def _scalar_value(inputs: dict[str, Any], name: str) -> Any:
+    spec = inputs.get(name)
+    return spec.get("value") if isinstance(spec, dict) and spec.get("type") == "scalar" else None
+
+
+def summarize_workloads(operator_name: str, workloads: list[dict[str, Any]]) -> dict[str, Any]:
+    """Compact description of the workload space, plus clearly invalid cases.
+
+    The model sees this before writing the kernel, so branch-heavy operators
+    (largest=false, dim=0, tiny/huge shapes) are known up front instead of only
+    after evaluation.
+    """
+    dtypes: dict[str, int] = {}
+    rank_counts: dict[int, int] = {}
+    per_rank: dict[int, dict[str, int]] = {}
+    scalar_values: dict[str, set[str]] = {}
+    tiny: list[int] = []
+    huge: list[int] = []
+    non_last_dim: list[int] = []
+    largest_false: list[int] = []
+    invalid: list[dict[str, Any]] = []
+
+    for index, workload in enumerate(workloads):
+        inputs = workload.get("inputs") if isinstance(workload, dict) else None
+        if not isinstance(inputs, dict):
+            continue
+        for name, spec in inputs.items():
+            if not isinstance(spec, dict):
+                continue
+            dtype = spec.get("dtype")
+            if isinstance(dtype, str):
+                dtypes[dtype] = dtypes.get(dtype, 0) + 1
+            shape = _workload_shape(spec)
+            if shape:
+                rank = len(shape)
+                rank_counts[rank] = rank_counts.get(rank, 0) + 1
+                numel = _workload_numel(shape)
+                bucket = per_rank.setdefault(rank, {"min": numel, "max": numel})
+                bucket["min"] = min(bucket["min"], numel)
+                bucket["max"] = max(bucket["max"], numel)
+                if numel <= 1:
+                    tiny.append(index)
+                if numel >= 100_000_000:
+                    huge.append(index)
+            if spec.get("type") == "scalar" and "value" in spec:
+                scalar_values.setdefault(name, set()).add(
+                    json.dumps(spec["value"], sort_keys=True)
+                )
+        dim = _scalar_value(inputs, "dim")
+        if isinstance(dim, int) and dim != -1:
+            non_last_dim.append(index)
+        if operator_name == "TopK" and _scalar_value(inputs, "largest") is False:
+            largest_false.append(index)
+
+    lowered = operator_name.lower()
+    for index, workload in enumerate(workloads):
+        inputs = workload.get("inputs") if isinstance(workload, dict) else None
+        if not isinstance(inputs, dict):
+            continue
+        dim = _scalar_value(inputs, "dim")
+        if lowered == "topk":
+            x_shape = _workload_shape(inputs.get("x", {}))
+            k = _scalar_value(inputs, "k")
+            if x_shape and isinstance(k, int):
+                axis = dim if isinstance(dim, int) and dim < 0 else (dim if isinstance(dim, int) else len(x_shape) - 1)
+                axis = axis + len(x_shape) if axis < 0 else axis
+                if 0 <= axis < len(x_shape) and k > x_shape[axis]:
+                    invalid.append({"index": index, "reason": f"k={k} exceeds x.shape[{axis}]={x_shape[axis]}"})
+        elif lowered == "scatter":
+            x_shape = _workload_shape(inputs.get("x", {}))
+            index_spec = inputs.get("index", {})
+            index_range = index_spec.get("range") if isinstance(index_spec, dict) else None
+            if x_shape and isinstance(dim, int) and isinstance(index_range, list) and len(index_range) == 2:
+                axis = dim + len(x_shape) if dim < 0 else dim
+                low, high = index_range
+                if 0 <= axis < len(x_shape) and isinstance(high, int) and isinstance(low, int):
+                    if high > x_shape[axis] or low < -x_shape[axis]:
+                        invalid.append({
+                            "index": index,
+                            "reason": f"index range [{low},{high}) exceeds x.shape[{axis}]={x_shape[axis]}",
+                        })
+
+    summary = {
+        "workload_count": len(workloads),
+        "dtypes": dtypes,
+        "rank_counts": {str(key): value for key, value in sorted(rank_counts.items())},
+        "numel_by_rank": {str(key): value for key, value in sorted(per_rank.items())},
+        "scalar_values": {key: sorted(values) for key, values in sorted(scalar_values.items())},
+        "edge_cases": {
+            "tiny_workloads": sorted(set(tiny)),
+            "huge_workloads": sorted(set(huge)),
+            "non_last_dim_workloads": sorted(set(non_last_dim)),
+            "largest_false_workloads": sorted(set(largest_false)),
+        },
+        "invalid_workloads": invalid,
+    }
+    return summary
+
+
 def validate_operator_task(task_dir: str | Path) -> dict[str, Any]:
     """Validate the minimum files required for one KernelBench operator task."""
     root = Path(task_dir).expanduser().resolve()
@@ -1129,6 +1258,7 @@ def validate_operator_task(task_dir: str | Path) -> dict[str, Any]:
     if not workloads:
         errors.append("workload.jsonl must contain at least one workload")
     level = root.parent.name if root.parent.name.startswith("level") else ""
+    _workload_summary = summarize_workloads(operator_name, workloads)
 
     return {
         "validation_passed": not errors,
@@ -1140,6 +1270,8 @@ def validate_operator_task(task_dir: str | Path) -> dict[str, Any]:
         "workload_path": str(workload_path),
         "workload_count": len(workloads),
         "definition": definition,
+        "workload_summary": _workload_summary,
+        "invalid_workloads": _workload_summary["invalid_workloads"],
     }
 
 
@@ -1216,6 +1348,36 @@ def _read_jsonl(path: Path) -> list[dict[str, Any]]:
             if isinstance(value, dict):
                 traces.append(value)
     return traces
+
+
+def _failing_workload_digest(traces: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], int]:
+    """Compact failing-case digest used by the repair prompt."""
+    failing: list[dict[str, Any]] = []
+    for idx, trace in enumerate(traces):
+        status = _status(trace)
+        if status == "PASSED":
+            continue
+        evaluation = trace.get("evaluation") or {}
+        workload = trace.get("workload") or {}
+        inputs = workload.get("inputs") or {}
+        detail = {}
+        for name, spec in inputs.items():
+            if not isinstance(spec, dict):
+                continue
+            if spec.get("shape"):
+                detail[name] = {"shape": spec.get("shape"), "dtype": spec.get("dtype")}
+            elif spec.get("type") == "scalar":
+                detail[name] = spec.get("value")
+        log = str(evaluation.get("log") or evaluation.get("error") or "")
+        failing.append({
+            "index": idx,
+            "uuid": workload.get("uuid", ""),
+            "status": status,
+            "inputs": detail,
+            "correctness": evaluation.get("correctness"),
+            "error": log[:300],
+        })
+    return failing, len(failing)
 
 
 def _status(trace: dict[str, Any]) -> str:

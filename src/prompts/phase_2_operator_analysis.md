@@ -34,6 +34,11 @@ This is a single-operator KernelBench task, not a project migration.
 2. Read `definition.json`, `workload.jsonl`, and the reference implementation.
    Use tool calls sequentially: issue at most one tool call per assistant turn,
    then continue after its result until the required inputs have been inspected.
+   Phase 0 output also contains `workload_summary` and `invalid_workloads`.
+   Enumerate every dtype, shape family, scalar value set and edge case listed
+   there (tiny/huge shapes, non-last dim, `largest=false`, extreme `k`, etc.)
+   before choosing the kernel strategy. Do not design only for the common case;
+   list the branches you will implement and call out any invalid workload.
 3. Describe the mathematical semantics, input/output contract, dtypes, shapes, scalar attributes, optional inputs, broadcasting, layout, and workload variations.
 4. Design an Ascend C implementation: kernel strategy, tiling, block dimension, GM/UB movement, dtype handling, tail handling, and numerical-risk points.
 5. Define the adapter entry point that KernelBench will call.

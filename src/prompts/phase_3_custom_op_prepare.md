@@ -63,7 +63,10 @@ The fixed Python API allowlist is a separate policy check and remains binding.
 ## Semantics and Memory Safety
 
 Use `definition.json` as the operator contract and the reference as the evaluator's
-comparison baseline. A mismatch or a TODO alone does not prove a reference defect.
+comparison baseline. Phase 0's `workload_summary` lists every dtype, shape family,
+scalar value set and edge case; implement all of those branches, not only the
+common one. If `invalid_workloads` is non-empty, report those cases instead of
+inventing handling for them. A mismatch or a TODO alone does not prove a reference defect.
 Record a suspected conflict with the exact contract, source branch and affected
 workload; do not edit the reference, weaken comparison, or claim a pass.
 
