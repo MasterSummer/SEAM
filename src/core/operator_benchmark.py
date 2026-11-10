@@ -533,38 +533,17 @@ def evaluate_and_summarize_operator(
             result.get("passed_workloads", 0) / expected_workloads
         )
 
-    # Workload execution state tracking
+    # Compact execution state: statuses are already counted in ``statuses``;
+    # only the failing cases need per-workload detail.
     if traces_path.is_file():
         traces = _read_jsonl(traces_path)
-        workload_states = []
-        for idx, trace in enumerate(traces):
-            status = _status(trace)
-            workload_states.append({
-                "index": idx,
-                "uuid": (trace.get("workload") or {}).get("uuid", ""),
-                "status": status,
-                "executed": True
-            })
-
-        # Add not-run workloads
-        for idx in range(len(traces), expected_workloads):
-            workload_states.append({
-                "index": idx,
-                "uuid": "",
-                "status": "NOT_RUN",
-                "executed": False
-            })
-
-        result["workload_states"] = workload_states
         result["executed_count"] = len(traces)
         result["not_run_count"] = expected_workloads - len(traces)
-
         failing, failing_count = _failing_workload_digest(traces)
         result["failing_workload_count"] = failing_count
-        result["failing_workloads"] = failing[:20]
+        result["failing_workloads"] = failing
         result["first_failure_workload"] = failing[0]["index"] if failing else ""
     else:
-        result["workload_states"] = []
         result["executed_count"] = 0
         result["not_run_count"] = expected_workloads
     result["evaluation_valid"] = bool(

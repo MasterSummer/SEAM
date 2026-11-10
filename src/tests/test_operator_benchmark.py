@@ -194,6 +194,20 @@ def test_candidate_manifest_detects_source_writeback_mismatch(tmp_path: Path) ->
     assert manifest["writeback_mismatches"] == ["adapter.py"]
 
 
+def test_failing_workload_digest_keeps_every_failure() -> None:
+    from core.operator_benchmark import _failing_workload_digest
+
+    traces = [
+        {"workload": {"uuid": f"w{i}", "inputs": {"x": {"shape": [2], "dtype": "float16"}}},
+         "evaluation": {"status": "INCORRECT_NUMERICAL", "correctness": {"max_absolute_error": 1.0}}}
+        for i in range(30)
+    ]
+    failing, count = _failing_workload_digest(traces)
+    assert count == 30
+    assert len(failing) == 30
+    assert failing[0]["uuid"] == "w0"
+
+
 def test_validate_real_gelu_task() -> None:
     task_dir = Path(
         "/Users/yiding/code/ascendc-kernelgen-data-master-npu-kernelbench-"

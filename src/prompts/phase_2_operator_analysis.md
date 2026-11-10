@@ -34,7 +34,7 @@ This is a single-operator KernelBench task, not a project migration.
 2. Read `definition.json`, `workload.jsonl`, and the reference implementation.
    Use tool calls sequentially: issue at most one tool call per assistant turn,
    then continue after its result until the required inputs have been inspected.
-   Phase 0 output also contains `workload_summary` and `invalid_workloads`.
+   Runtime evidence includes `workload_summary` (with `invalid_workloads`).
    Enumerate every dtype, shape family, scalar value set and edge case listed
    there (tiny/huge shapes, non-last dim, `largest=false`, extreme `k`, etc.)
    before choosing the kernel strategy. Do not design only for the common case;

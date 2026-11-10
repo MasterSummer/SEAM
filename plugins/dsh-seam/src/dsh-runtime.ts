@@ -34,7 +34,19 @@ export interface RuntimeOptions {
   containerBackend?: ContainerExecutionBackend
   render(execution: Execution): Promise<string>
   onSessions?(sessions: Record<string, string>): Promise<void>
-  onEvents?(phase: string, events: readonly DshEvent[]): Promise<void>
+  onEvents?(phase: string, events: readonly DshEvent[]): Promise<string | void>
+}
+
+function summarizeEvents(events: readonly DshEvent[]): Data {
+  const types: Record<string, number> = {}
+  let lastError = ''
+  for (const event of events) {
+    types[event.type] = (types[event.type] ?? 0) + 1
+    const data = event.data as Data
+    const error = data && typeof data.error === 'string' ? data.error : ''
+    if (error) lastError = error.slice(0, 300)
+  }
+  return { event_count: events.length, types, last_error: lastError }
 }
 
 export class DshRuntime implements Runtime {
@@ -101,7 +113,7 @@ export class DshRuntime implements Runtime {
         await agent.whenIdle()
         await this.options.host.flush(agent)
         const events = agent.session.snapshotEvents().slice(start)
-        await this.options.onEvents?.(execution.phase.id, events)
+        const eventsPath = await this.options.onEvents?.(execution.phase.id, events)
         execution.signal.throwIfAborted()
         let turn: unknown
         let active: unknown
@@ -112,14 +124,14 @@ export class DshRuntime implements Runtime {
         if (turn === undefined) throw new Error('dsh did not claim the submitted message')
         const end = events.find(event => event.type === 'turn/end' && event.data.turn === turn)
         const reason = end?.data.reason as Data | undefined
-        if (reason?.kind !== 'completed') return { status: 'failure', output: { failure_kind: 'runtime_turn_failed', session_id: agent.id, reason, events } }
+        if (reason?.kind !== 'completed') return { status: 'failure', output: { failure_kind: 'runtime_turn_failed', session_id: agent.id, reason, event_summary: summarizeEvents(events), events_path: eventsPath } }
         const messages = events.filter(event => event.type === 'assistant/message' && event.data.turn === turn && !event.data.interrupted)
         const finalMessage = messages.at(-1)?.data.message as { content?: { type: string; text?: string }[] } | undefined
         const raw = finalMessage?.content?.filter(block => block.type === 'text').map(block => block.text ?? '').join('') ?? ''
         const fenced = /^```(?:json)?\s*\n([\s\S]*?)\n```\s*$/.exec(raw.trim())
         let output: unknown
         try { output = JSON.parse(fenced?.[1] ?? raw) }
-        catch { return { status: 'failure', output: { failure_kind: 'invalid_json_output', raw_response: raw, session_id: agent.id } } }
+        catch { return { status: 'failure', output: { failure_kind: 'invalid_json_output', raw_response: raw.slice(0, 8000), session_id: agent.id, event_summary: summarizeEvents(events), events_path: eventsPath } } }
         if (!output || typeof output !== 'object' || Array.isArray(output)) return { status: 'failure', output: { failure_kind: 'invalid_output_shape', raw_response: raw } }
         return { status: 'success', output: output as Data }
       } finally { execution.signal.removeEventListener('abort', cancel) }

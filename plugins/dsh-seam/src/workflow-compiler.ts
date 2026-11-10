@@ -11,7 +11,7 @@ export interface CompiledWorkflow {
 }
 
 const json = (value: unknown): string => JSON.stringify(value)
-const evaluationFields = ['operator_passed', 'evaluation_status', 'operator_pass_rate', 'workload_pass_rate', 'total_workloads', 'passed_workloads', 'failure_category', 'timeout_classification', 'cleanup_status', 'visible_device', 'failure_manifest_path', 'candidate_manifest_path', 'candidate_manifest', 'evaluation_scope', 'evaluation_completeness', 'first_failure_workload', 'cascade_failure_count', 'resource_before', 'resource_after', 'work_dir', 'profile_dir', 'traces_path', 'summary_path', 'stdout_path', 'stderr_path']
+const evaluationFields = ['operator_passed', 'evaluation_status', 'operator_pass_rate', 'workload_pass_rate', 'total_workloads', 'passed_workloads', 'failure_category', 'timeout_classification', 'cleanup_status', 'visible_device', 'failure_manifest_path', 'candidate_manifest_path', 'candidate_manifest', 'evaluation_scope', 'evaluation_completeness', 'first_failure_workload', 'statuses', 'failing_workload_count', 'failing_workloads', 'reference_invalid', 'cascade_failure_count', 'resource_before', 'resource_after', 'work_dir', 'profile_dir', 'traces_path', 'summary_path', 'stdout_path', 'stderr_path']
 
 function routes(step: Phase): Record<string, string> {
   for (const candidate of [step.routes, step.params?.routes, step.transitions]) {

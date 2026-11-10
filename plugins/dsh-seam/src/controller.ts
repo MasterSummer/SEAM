@@ -86,7 +86,7 @@ export class SeamController {
       }
       const release = await this.lease(workspace)
       let engine: NativeWorkflow | undefined
-      const runtime = new DshRuntime({ host: this.host, workspace, roleTools: this.config.roleTools, roleOptions: this.config.roleOptions, containerBackend, lifecycle: Object.fromEntries(Object.entries(workflow.agents ?? {}).map(([role, agent]) => [role, agent.lifecycle ?? 'persistent'])), render: execution => bridge.render(execution), onSessions: async () => { await engine?.checkpoint() }, onEvents: async (phase, events) => { await store.artifact(`${phase}-events`, events) } })
+      const runtime = new DshRuntime({ host: this.host, workspace, roleTools: this.config.roleTools, roleOptions: this.config.roleOptions, containerBackend, lifecycle: Object.fromEntries(Object.entries(workflow.agents ?? {}).map(([role, agent]) => [role, agent.lifecycle ?? 'persistent'])), render: execution => bridge.render(execution), onSessions: async () => { await engine?.checkpoint() }, onEvents: async (phase, events) => store.artifact(`${phase}-events`, events) })
       try {
         this.lifecycle.signal.throwIfAborted()
         engine = new NativeWorkflow({ workflow, runtime, handlers: { builtin: bridge.builtin, shell: createShellPhase(containerBackend ?? new LocalExecutionBackend()) }, store, workspace, context: request.context, validate: (execution, result) => bridge.validate(execution, result), defaultTimeoutSeconds: this.config.defaultTimeoutSeconds, signal: this.lifecycle.signal, containerBackend: Boolean(containerBackend) }, this.workflowEngine, this.transport, parent, bundle)
