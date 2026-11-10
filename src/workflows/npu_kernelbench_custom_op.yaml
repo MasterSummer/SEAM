@@ -80,6 +80,7 @@ phases:
       include:
         - cuda-custom-op-to-npu-custom-op
         - npu-kernelbench-numerics
+        - ascendc-event-sync
       inject_full: false
       missing: error
     input_mapping:
@@ -184,6 +185,7 @@ sub_workflows:
           include:
             - cuda-custom-op-to-npu-custom-op
             - npu-kernelbench-numerics
+            - ascendc-event-sync
           inject_full: false
           missing: error
         on_failure: continue
@@ -259,6 +261,7 @@ sub_workflows:
           include:
             - cuda-custom-op-to-npu-custom-op
             - npu-kernelbench-numerics
+            - ascendc-event-sync
           inject_full: true
           missing: error
         input_mapping:

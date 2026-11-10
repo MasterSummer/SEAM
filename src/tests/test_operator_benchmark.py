@@ -75,7 +75,7 @@ def test_kernelbench_agents_share_path_only_documentation() -> None:
         phase for phase in workflow.phases if phase.id == "phase_2_operator_analysis"
     )
     assert analysis.runtime_skills is not None
-    assert analysis.runtime_skills.include == ["cuda-custom-op-to-npu-custom-op", "npu-kernelbench-numerics"]
+    assert analysis.runtime_skills.include == ["cuda-custom-op-to-npu-custom-op", "npu-kernelbench-numerics", "ascendc-event-sync"]
     assert analysis.runtime_skills.inject_full is False
     assert analysis.runtime_skills.missing == "error"
 
