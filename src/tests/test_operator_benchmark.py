@@ -59,6 +59,7 @@ def test_kernelbench_workflow_combines_generation_evaluation_and_repair_loop() -
     assert phases["fix_operator"]["condition"] == (
         "${loop_state.operator_passed} != true "
         "and ${loop_state.evaluation_classification.repair_role} != 'operator_environment_fixer' "
+        "and ${loop_state.evaluation_classification.repair_role} != 'timeout_analyzer' "
         "and ${loop_state.error_analysis.repair_role} != 'operator_environment_fixer'"
     )
     assert phases["fix_operator_environment"]["on_failure"] == "continue"
@@ -113,6 +114,20 @@ def test_operator_evaluation_classification_routes_reference_and_device_failures
     assert device["repair_role"] == "operator_fixer"
     assert device["requires_single_workload_debug"] is True
     assert device["first_failure_workload"] == "case-014"
+
+    timeout = classify_operator_evaluation(
+        {
+            "evaluation_status": "timeout",
+            "statuses": {"TIMEOUT": 1},
+            "executed_count": 1,
+            "evaluation_completeness": "partial",
+            "first_failure_workload": 0,
+        }
+    )
+    assert timeout["category"] == "timeout"
+    assert timeout["timeout_kind"] == "first_workload"
+    assert timeout["repair_role"] == "timeout_analyzer"
+    assert timeout["requires_instrumented_probe"] is True
 
     ordinary_candidate_log = classify_operator_evaluation(
         {

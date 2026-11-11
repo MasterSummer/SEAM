@@ -38,6 +38,25 @@ Runtime configuration result: {runtime_configuration}
 Latest evaluator result: {evaluation_result}
 Deterministic evaluation classification: {evaluation_classification}
 
+## Timeout Analysis
+
+If `evaluation_classification.repair_role` is `timeout_analyzer`, this is a
+timeout-diagnosis turn, not a repair turn:
+
+- Do not edit source, do not set `repair_role` to `operator_fixer`, and do not
+  propose speculative kernel changes.
+- Record from the supplied evidence: `timeout_kind` (no trace / first workload /
+  partial trace), the timeout workload index and inputs, `executed_count`,
+  `statuses`, and `profile_dir`.
+- Check whether the reference profile exists and whether the solution profile is
+  missing; a missing solution profile means the candidate did not return.
+- Separate host launch (`EXEC_KERNEL_CMD`, block dimension), TQue/DataCopyPad
+  waits, Gather, and event-flag synchronization as alternative hypotheses.
+- Put the smallest discriminating check in `next_verification`: a single-workload
+  run with `ASCEND_LAUNCH_BLOCKING=1` and host/kernel markers, repeated 2-3 times.
+- Use `category: "runtime"` (or `"unknown"`), `repair_role: "none"`,
+  `suggested_fix: ""`, and state the missing evidence explicitly.
+
 ## Repair Routing
 
 Use `failure_category`, `timeout_classification`, `resource_before`, and

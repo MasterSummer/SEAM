@@ -145,6 +145,8 @@ sub_workflows:
         status: success
       - condition: "$.stagnation_count >= 3"
         status: stagnation
+      - condition: "$.repair_role == 'timeout_analyzer'"
+        status: failure
     phases:
       - id: initialize_operator_artifact
         type: builtin
@@ -256,6 +258,7 @@ sub_workflows:
         condition: >-
           ${loop_state.operator_passed} != true
           and ${loop_state.evaluation_classification.repair_role} != 'operator_environment_fixer'
+          and ${loop_state.evaluation_classification.repair_role} != 'timeout_analyzer'
           and ${loop_state.error_analysis.repair_role} != 'operator_environment_fixer'
         runtime_skills:
           include:
@@ -276,6 +279,7 @@ sub_workflows:
         condition: >-
           ${loop_state.operator_passed} != true
           and ${loop_state.evaluation_classification.repair_role} != 'operator_environment_fixer'
+          and ${loop_state.evaluation_classification.repair_role} != 'timeout_analyzer'
           and ${loop_state.error_analysis.repair_role} != 'operator_environment_fixer'
         output_as: "operator_artifact_pack"
         on_failure: continue

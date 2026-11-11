@@ -818,10 +818,7 @@ def classify_operator_evaluation(result: dict[str, Any]) -> dict[str, Any]:
         }
     if category in {
         "device_memory_fault",
-        "device_sync_hang",
         "host_crash",
-        "no_trace_timeout",
-        "partial_trace_timeout",
     }:
         return {
             "category": category,
@@ -829,6 +826,33 @@ def classify_operator_evaluation(result: dict[str, Any]) -> dict[str, Any]:
             "evaluation_completeness": completeness,
             "requires_single_workload_debug": True,
             "first_failure_workload": result.get("first_failure_workload", ""),
+        }
+    # Timeout is its own failure class: analyze where it hangs first, never
+    # send it straight back to the code fixer.
+    if (
+        str(result.get("evaluation_status") or "") == "timeout"
+        or category in {"device_sync_hang", "no_trace_timeout", "partial_trace_timeout"}
+    ):
+        failing = result.get("failing_workloads") or []
+        first = failing[0] if failing and isinstance(failing[0], dict) else {}
+        executed = int(result.get("executed_count") or 0)
+        timeout_kind = "no_trace" if executed == 0 else (
+            "first_workload" if executed <= 1 else "partial_trace"
+        )
+        return {
+            "category": "timeout",
+            "timeout_kind": timeout_kind,
+            "timeout_classification": result.get("timeout_classification", category),
+            "repair_role": "timeout_analyzer",
+            "evaluation_completeness": completeness,
+            "requires_single_workload_debug": True,
+            "requires_instrumented_probe": True,
+            "first_failure_workload": result.get("first_failure_workload", ""),
+            "timeout_workload": {
+                "index": first.get("index"),
+                "inputs": first.get("inputs"),
+                "status": first.get("status"),
+            } if first else None,
         }
     if category in {"compile_error", "incomplete_trace"}:
         return {
