@@ -54,12 +54,12 @@ def test_kernelbench_workflow_combines_generation_evaluation_and_repair_loop() -
     assert phases["analyze_operator_failure"]["condition"] == (
         "${loop_state.operator_passed} != true"
     )
-    assert "evaluation_classification.repair_role" in phases["fix_operator_environment"]["condition"]
+    assert "loop_state.repair_role" in phases["fix_operator_environment"]["condition"]
     assert phases["fix_operator_environment"]["condition"].count("operator_environment_fixer") == 2
     assert phases["fix_operator"]["condition"] == (
         "${loop_state.operator_passed} != true "
-        "and ${loop_state.evaluation_classification.repair_role} != 'operator_environment_fixer' "
-        "and ${loop_state.evaluation_classification.repair_role} != 'timeout_analyzer' "
+        "and ${loop_state.repair_role} != 'operator_environment_fixer' "
+        "and ${loop_state.repair_role} != 'timeout_analyzer' "
         "and ${loop_state.error_analysis.repair_role} != 'operator_environment_fixer'"
     )
     assert phases["fix_operator_environment"]["on_failure"] == "continue"
