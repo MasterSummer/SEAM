@@ -139,15 +139,28 @@ the KernelBench result.
 
 Inspect the complete workload metadata for dtype, shape and attribute coverage;
 do not infer coverage or pass rates from a sample. Record the intended paths and
-unverified risks in the manifest. This phase may run at most one narrow structural
-check; do not launch an independent NPU evaluator or per-dtype test suite here.
+unverified risks in the manifest. You may build the candidate and run
+`npu-kernelbench eval --limit 2` smoke tests as many times as useful; this is
+not capped to one check. Use the smoke traces to catch compile, launch and
+gross numerical failures before handing off. You may also use the `subagent`
+tool for independent read-only probes (for example, a separate shape or tiling
+analysis); keep edits in this session and do not let parallel subagents write
+the same source files.
 
-The controller owns packaging and authoritative build/full-workload evaluation.
-Report a command, exit status and log path for any check actually run. Use
-`build_status: "not_run"` unless a real build was executed. Structural validity,
-API inspection and candidate preparation do not establish compilation or runtime
-correctness. Missing NPU access is not proof that the target runtime is broken;
-leave runtime validation pending for the controller on the execution host.
+The controller still owns packaging and the authoritative full-workload
+evaluation. Report a command, exit status and log path for every check actually
+run. Use `build_status: "not_run"` unless a real build was executed. Structural
+validity, API inspection and smoke results do not establish full-workload
+correctness; the controller must still run the complete evaluation.
+
+## Tool and Time Budget
+
+This phase has a hard 10-minute budget. Use at most **20 tool calls**. Do not
+read full SDK implementation headers or scan the repository; rely on the phase-2
+declarations and the focused example. Build and smoke as needed, but stop
+exploring and return the JSON before the budget expires. If the candidate is
+incomplete, return `prepared: false` or a timeout-compatible manifest rather
+than spending the whole budget reading headers.
 
 ## Output Format
 

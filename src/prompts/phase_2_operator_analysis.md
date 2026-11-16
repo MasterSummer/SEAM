@@ -44,6 +44,14 @@ This is a single-operator KernelBench task, not a project migration.
 5. Define the adapter entry point that KernelBench will call.
 6. Do not modify `definition.json` or `workload.jsonl`.
 
+## Tool and Time Budget
+
+This phase has a hard 15-minute budget. Use at most **12 tool calls**. Read
+the definition, workload and the relevant declaration/example sections only;
+do not scan the SDK tree or open full kernel implementation headers one by one.
+If a detail cannot be verified within the budget, record it as an unresolved
+assumption and produce the required JSON instead of continuing to explore.
+
 ## Documentation and API Evidence
 
 Use the `Source` paths in Explicit Runtime Skills to read the skill entry point.

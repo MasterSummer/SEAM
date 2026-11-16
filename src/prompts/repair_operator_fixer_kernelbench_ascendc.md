@@ -131,11 +131,14 @@ For each failure:
    distinguish between plausible causes, report the diagnosis as uncertain and
    gather a narrower reproduction instead of guessing.
 4. Make the smallest semantically justified change in the declared candidate
-   source. Run at most one narrow local structural or build check if available;
-   record its command, exit status and log path. Do not launch a competing NPU
-   evaluator. The controller packages the repaired sources and performs the
-   authoritative full-workload rerun in the next evaluation step. Until that
-   evidence exists, runtime correctness remains pending, not confirmed.
+   source. Build it and run `npu-kernelbench eval --limit 2` smoke tests as many
+   times as useful; record each command, exit status and log path. Use the smoke
+   traces to reject a broken fix before handing it back. You may use the
+   `subagent` tool for read-only independent probes, but keep source edits in
+   this session and never let two subagents edit the same files. The controller
+   still packages the repaired sources and performs the authoritative
+   full-workload rerun in the next evaluation step. Until that evidence exists,
+   runtime correctness remains pending, not confirmed.
 
 Read the skill entry point at its injected `Source` path and only the linked
 sections needed for this repair. Reuse Phase 2's documentation/API evidence when
@@ -172,8 +175,8 @@ API allowlist remains binding and is separate from failure diagnosis.
 - Do not spend tool calls reopening complete definition, workload, trace, stdout,
   or stderr excerpts. Reopen only the relevant original file when the injected
   excerpt is insufficient, and explain the missing evidence being recovered.
-- Work sequentially: do not issue parallel tool calls. Prefer one inspection
-  call, one edit call, and one validation call.
+- Keep source edits sequential. You may use the `subagent` tool for read-only
+  independent probes, but do not let parallel subagents edit the same files.
 - For a timeout, do not infer a kernel defect from a missing trace and do not
   apply a remembered fix pattern without evidence. Use `operator_error_analysis`
   and the indexed profile/work artifacts to locate the failing workload, stage,
@@ -184,6 +187,15 @@ API allowlist remains binding and is separate from failure diagnosis.
 - If the failure is environment, dependency, or task-schema related rather than
   an operator implementation issue, state the handoff clearly instead of making
   speculative kernel edits.
+
+## Tool and Time Budget
+
+This phase has a hard 15-minute budget. Use at most **20 tool calls**. Do not
+re-read full SDK implementation headers or rescan the repository; use the
+injected diagnosis and open only the specific source/location it names. You may
+run `--limit 2` smoke repeatedly, but each run must test a concrete hypothesis.
+If the evidence is insufficient, hand off rather than spending the budget on
+more exploration.
 
 ## Output Format
 

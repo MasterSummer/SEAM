@@ -628,5 +628,5 @@ def test_kernelbench_repair_prompt_uses_injected_text_not_evidence_paths() -> No
     assert "{operator_process_metadata_text}" in prompt
     assert "{build_artifact_path}" not in prompt
     assert "{latest_trace_path}" not in prompt
-    assert "do not issue parallel tool calls" in prompt
+    assert "read-only independent probes" in prompt
     assert "Do not spend tool calls reopening" in prompt

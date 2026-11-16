@@ -127,6 +127,8 @@ cat > "$PATCH" <<EOF
   disabled: false
 - id: tool-fs-search
   disabled: false
+- id: tool-subagent
+  disabled: false
 - id: llm-pi-ai
   config:
     providers:
@@ -154,10 +156,10 @@ cat > "$PATCH" <<EOF
         defaultTimeoutSeconds: $PHASE_TIMEOUT
         maxPromptBytes: 262144
         roleTools:
-          main_engineer: [read, write, edit, glob, grep, bash]
-          error_analyzer: [read, glob, grep, bash]
-          operator_fixer: [read, write, edit, glob, grep, bash]
-          operator_environment_fixer: [read, write, edit, glob, grep, bash]
+          main_engineer: [read, write, edit, glob, grep, bash, subagent]
+          error_analyzer: [read, glob, grep, bash, subagent]
+          operator_fixer: [read, write, edit, glob, grep, bash, subagent]
+          operator_environment_fixer: [read, write, edit, glob, grep, bash, subagent]
         roleOptions:
           main_engineer:
             provider: $PROVIDER

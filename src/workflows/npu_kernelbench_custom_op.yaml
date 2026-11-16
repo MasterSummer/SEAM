@@ -6,7 +6,7 @@ target_platform:
   preset: npu_ascend
 
 globals:
-  max_repair_iterations: 8  # 从 5 提到 8，应对 qwen3.8-27b 的慢修复
+  max_repair_iterations: 5  # 每轮最多 5 次修复；单轮预算 1h
   stagnation_threshold: 3
   review_gate_enabled: false
 
@@ -76,6 +76,7 @@ phases:
     agent: main_engineer
     prompt_template: "phase_2_operator_analysis"
     validator: operator_analysis
+    timeout: 900
     runtime_skills:
       include:
         - cuda-custom-op-to-npu-custom-op
@@ -137,7 +138,7 @@ sub_workflows:
   operator_repair_loop:
     id: operator_repair_loop
     type: loop
-    max_iterations: 8  # 与 globals 保持一致
+    max_iterations: 5  # 与 globals 保持一致
     stagnation_threshold: 3
     review_gate_enabled: false
     stop_conditions:
@@ -169,7 +170,7 @@ sub_workflows:
         type: llm
         agent: main_engineer
         prompt_template: "phase_3_custom_op_prepare"
-        timeout: 2400  # qwen3.8-27b 慢，从 1200 提到 2400（40 分钟）
+        timeout: 600  # 单轮总预算 1h：prepare 10min
         condition: >-
           ${loop_state.operator_artifact_state.rebuild_required} == true
         output_as: "operator_preparation"
@@ -197,6 +198,7 @@ sub_workflows:
         operation: "operator_artifact_pack"
         params:
           producer: prepare_operator
+          allow_timeout: true
         condition: "${loop_state.operator_artifact_state.rebuild_required} == true"
         output_as: "operator_artifact_pack"
         on_failure: continue
@@ -211,7 +213,8 @@ sub_workflows:
         type: builtin
         operation: "operator_kernelbench_eval"
         params:
-          timeout: 1800
+          timeout: 900
+          smoke_limit: 2
         on_failure: continue
 
       - id: classify_operator_evaluation
@@ -225,6 +228,7 @@ sub_workflows:
         agent: error_analyzer
         prompt_template: "phase_operator_error_analysis"
         validator: operator_error_analysis
+        timeout: 600
         condition: "${loop_state.operator_passed} != true"
         output_as: "error_analysis"
         input_mapping:
@@ -238,6 +242,7 @@ sub_workflows:
         type: llm
         agent: operator_environment_fixer
         prompt_template: "repair_operator_environment"
+        timeout: 300
         condition: >-
           ${loop_state.operator_passed} != true
           and ${loop_state.error_analysis.repair_role} == 'operator_environment_fixer'
@@ -256,7 +261,7 @@ sub_workflows:
         type: llm
         agent: operator_fixer
         prompt_template: "repair_operator_fixer_kernelbench_ascendc"
-        timeout: 2400  # qwen3.8-27b 慢，从 1200 提到 2400（40 分钟）
+        timeout: 900  # 单轮总预算 1h：fix 15min
         condition: >-
           ${loop_state.operator_passed} != true
           and ${loop_state.error_analysis.repair_role} == 'operator_fixer'
@@ -280,6 +285,7 @@ sub_workflows:
         operation: "operator_artifact_pack"
         params:
           producer: fix_operator
+          allow_timeout: true
         condition: >-
           ${loop_state.operator_passed} != true
           and ${loop_state.error_analysis.repair_role} == 'operator_fixer'

@@ -157,6 +157,7 @@ def run_kernelbench_eval(
     *,
     timeout: int = 600,
     runtime_env_file: str | Path | None = None,
+    limit: int | None = None,
 ) -> dict[str, Any]:
     """Run KernelBench once and persist complete process output beside traces."""
     task = Path(task_dir).expanduser().resolve()
@@ -187,6 +188,8 @@ def run_kernelbench_eval(
         "--timeout", str(workload_timeout), "-o", str(traces), "--verbose",
         "--work-dir", str(work_dir), "--profile-dir", str(profile_dir),
     ]
+    if limit is not None and limit > 0:
+        command.extend(["--limit", str(limit)])
     runtime_env = {**os.environ, "PYTHONUNBUFFERED": "1"}
     _ensure_path(runtime_env, "/usr/local/bin")
     if runtime_env_file:
@@ -443,6 +446,7 @@ def evaluate_and_summarize_operator(
     iteration: str = "0",
     timeout: int = 600,
     runtime_env_file: str | Path | None = None,
+    smoke_limit: int | None = None,
 ) -> dict[str, Any]:
     """Run one full operator evaluation and summarize its traces."""
     evaluation_id = f"eval-{uuid.uuid4().hex}"
@@ -504,6 +508,47 @@ def evaluate_and_summarize_operator(
         raise ValueError("candidate changed before evaluation snapshot")
     atomic_write_bytes(snapshot_path, snapshot_bytes)
     snapshot_path.chmod(0o444)
+    if smoke_limit is not None and smoke_limit > 0:
+        smoke_dir = evaluation_dir / "smoke"
+        smoke_traces = smoke_dir / "traces.jsonl"
+        smoke_dir.mkdir(parents=True, exist_ok=True)
+        smoke_process = run_kernelbench_eval(
+            task_dir,
+            snapshot_path,
+            kernelbench_root,
+            smoke_traces,
+            timeout=min(timeout, 300),
+            runtime_env_file=evaluation_env_file,
+            limit=smoke_limit,
+        )
+        smoke_result = dict(smoke_process)
+        smoke_result.update({
+            "evaluation_id": evaluation_id,
+            "iteration": str(iteration),
+            "evaluation_dir": str(evaluation_dir),
+            "smoke_dir": str(smoke_dir),
+            "smoke_only": True,
+            "smoke_limit": smoke_limit,
+            "evaluation_runtime_env_file": str(evaluation_env_file),
+            "candidate_manifest_path": candidate_manifest["manifest_path"],
+            "candidate_manifest": candidate_manifest,
+            "evaluated_solution_path": str(snapshot_path),
+            "evaluated_solution_sha256": _sha256_bytes(snapshot_bytes),
+        })
+        if smoke_traces.is_file():
+            smoke_result.update(summarize_traces(
+                smoke_traces,
+                operator_name=Path(task_dir).name,
+                summary_path=smoke_traces.with_name(f"summary.iteration-{iteration}.smoke.json"),
+            ))
+        smoke_result["expected_workloads"] = smoke_limit
+        smoke_result["trace_complete"] = (
+            smoke_result.get("total_workloads", 0) == smoke_limit
+        )
+        if not smoke_result["trace_complete"]:
+            smoke_result["operator_passed"] = False
+        if smoke_result.get("evaluation_status") != "completed" or not smoke_result.get("operator_passed"):
+            return smoke_result
     process = run_kernelbench_eval(
         task_dir,
         snapshot_path,

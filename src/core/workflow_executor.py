@@ -4053,13 +4053,16 @@ class WorkflowExecutor:
             if not isinstance(producer_output, dict):
                 producer_output = {}
             if producer and producer_output.get("framework_execution_status") != "success":
-                return "failure", {
-                    "operation": operation,
-                    "packed": False,
-                    "errors": [
-                        f"{producer} did not complete successfully; candidate not published"
-                    ],
-                }
+                timed_out = producer_output.get("failure_kind") == "phase_timeout"
+                allow_timeout = str(_params.get("allow_timeout", "")).lower() in {"true", "1", "yes"}
+                if not (timed_out and allow_timeout):
+                    return "failure", {
+                        "operation": operation,
+                        "packed": False,
+                        "errors": [
+                            f"{producer} did not complete successfully; candidate not published"
+                        ],
+                    }
             result = pack_operator_solution(solution, task_dir)
             return ("success" if result["packed"] else "failure", result)
 
@@ -4159,6 +4162,7 @@ class WorkflowExecutor:
                 output_dir,
                 iteration=iteration,
                 timeout=int(_params.get("timeout", 600)),
+                smoke_limit=int(_params.get("smoke_limit", 0)) or None,
                 runtime_env_file=self._resolve_operator_value(
                     "OPERATOR_RUNTIME_ENV_FILE", context, loop_vars
                 ) or None,

@@ -315,7 +315,10 @@ def test_workflow_generates_and_packs_then_evaluates_repaired_sources(
     def evaluate(task_dir, snapshot, kernelbench_root, traces, **kwargs):
         evaluated_contents.append(json.loads(snapshot.read_text())["sources"][0]["content"])
         status = "COMPILE_ERROR" if len(evaluated_contents) == 1 else "PASSED"
-        traces.write_text(json.dumps({"uuid": "case-001", "evaluation": {"status": status}}) + "\n")
+        count = int(kwargs.get("limit") or 1)
+        with traces.open("w", encoding="utf-8") as stream:
+            for index in range(count):
+                stream.write(json.dumps({"uuid": f"case-{index + 1}", "evaluation": {"status": status}}) + "\n")
         return {"evaluation_status": "completed", "traces_path": str(traces)}
 
     monkeypatch.setattr(executor, "_send_sub_workflow_llm_command", generate)
