@@ -145,7 +145,7 @@ sub_workflows:
         status: success
       - condition: "$.stagnation_count >= 3"
         status: stagnation
-      - condition: "$.repair_role == 'timeout_analyzer'"
+      - condition: "$.error_analysis.repair_role == 'none'"
         status: failure
     phases:
       - id: initialize_operator_artifact
@@ -224,6 +224,7 @@ sub_workflows:
         type: llm
         agent: error_analyzer
         prompt_template: "phase_operator_error_analysis"
+        validator: operator_error_analysis
         condition: "${loop_state.operator_passed} != true"
         output_as: "error_analysis"
         input_mapping:
@@ -239,13 +240,14 @@ sub_workflows:
         prompt_template: "repair_operator_environment"
         condition: >-
           ${loop_state.operator_passed} != true
-          and ${loop_state.evaluation_classification.repair_role} == 'operator_environment_fixer'
-          or ${loop_state.operator_passed} != true
           and ${loop_state.error_analysis.repair_role} == 'operator_environment_fixer'
         input_mapping:
           runtime_report: "${loop_vars.OPERATOR_RUNTIME_REPORT}"
           runtime_configuration: "${loop_vars.OPERATOR_RUNTIME_CONFIGURATION}"
           error_analysis: "${loop_state.error_analysis}"
+          evaluation_result: "${loop_state.evaluate_operator}"
+          evaluation_classification: "${loop_state.evaluation_classification}"
+          diagnostic_artifacts_path: "${loop_state.evaluate_operator.diagnostic_artifacts_path}"
           operator_task_dir: "${loop_vars.OPERATOR_TASK_DIR}"
           kernelbench_root: "${loop_vars.KERNELBENCH_ROOT}"
         on_failure: continue
@@ -257,9 +259,7 @@ sub_workflows:
         timeout: 2400  # qwen3.8-27b 慢，从 1200 提到 2400（40 分钟）
         condition: >-
           ${loop_state.operator_passed} != true
-          and ${loop_state.evaluation_classification.repair_role} != 'operator_environment_fixer'
-          and ${loop_state.evaluation_classification.repair_role} != 'timeout_analyzer'
-          and ${loop_state.error_analysis.repair_role} != 'operator_environment_fixer'
+          and ${loop_state.error_analysis.repair_role} == 'operator_fixer'
         runtime_skills:
           include:
             - cuda-custom-op-to-npu-custom-op
@@ -269,6 +269,10 @@ sub_workflows:
           missing: error
         input_mapping:
           operator_constraints: "${loop_vars.OPERATOR_CONSTRAINTS}"
+          evaluation_result: "${loop_state.evaluate_operator}"
+          evaluation_classification: "${loop_state.evaluation_classification}"
+          error_analysis: "${loop_state.error_analysis}"
+          diagnostic_artifacts_path: "${loop_state.evaluate_operator.diagnostic_artifacts_path}"
         on_failure: continue
 
       - id: pack_repaired_operator
@@ -278,8 +282,6 @@ sub_workflows:
           producer: fix_operator
         condition: >-
           ${loop_state.operator_passed} != true
-          and ${loop_state.evaluation_classification.repair_role} != 'operator_environment_fixer'
-          and ${loop_state.evaluation_classification.repair_role} != 'timeout_analyzer'
-          and ${loop_state.error_analysis.repair_role} != 'operator_environment_fixer'
+          and ${loop_state.error_analysis.repair_role} == 'operator_fixer'
         output_as: "operator_artifact_pack"
         on_failure: continue

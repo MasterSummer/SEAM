@@ -71,6 +71,73 @@ class MockResult:
 
 
 class TestLoopSubworkflow:
+    def test_skipped_analysis_does_not_reuse_prior_iteration_repair_role(self, temp_dir):
+        sub_workflow = SubWorkflowDefinition(
+            id="analysis_loop",
+            max_iterations=2,
+            stagnation_threshold=10,
+            phases=[
+                {
+                    "id": "analyze_operator_failure",
+                    "type": "llm",
+                    "agent": "role",
+                    "output_as": "error_analysis",
+                    "condition": "${loop_state.iteration} == 1",
+                },
+                {
+                    "id": "fix_operator",
+                    "type": "llm",
+                    "agent": "role",
+                    "condition": "${loop_state.error_analysis.repair_role} == 'operator_fixer'",
+                },
+            ],
+            blocks={},
+        )
+        workflow = WorkflowDefinition(
+            name="analysis_iteration_test",
+            version="1.0",
+            phases=[],
+            terminals=["complete"],
+            agents={"role": {"role": "role", "lifecycle": "persistent"}},
+            sub_workflows={"analysis_loop": sub_workflow},
+        )
+        session_mgr = MagicMock()
+        session_mgr.get_or_create.return_value = "session"
+        artifact_store = MagicMock()
+        artifact_store.artifact_dir = temp_dir
+        prompt_loader = MagicMock()
+        prompt_loader.load_prompt.return_value = "prompt"
+        executor = WorkflowExecutor(
+            workflow,
+            session_mgr,
+            artifact_store,
+            prompt_loader,
+            MagicMock(),
+            project_dir=temp_dir,
+            output_dir=temp_dir,
+        )
+        calls = []
+
+        def respond(*, phase_id, **_kwargs):
+            calls.append(phase_id)
+            if phase_id == "analyze_operator_failure":
+                return '{"repair_role": "operator_fixer"}'
+            return '{"fixed": true}'
+
+        executor._send_sub_workflow_llm_command = respond
+        loop_phase = PhaseDefinition(
+            id="repair",
+            name="Repair",
+            prompt_template="",
+            output_schema={},
+            type="loop",
+            sub_workflow="analysis_loop",
+        )
+
+        executor._execute_loop_phase(loop_phase, {}, {})
+
+        assert calls == ["analyze_operator_failure", "fix_operator"]
+
     def test_mini_phase_propagates_builtin_operation(self, temp_dir):
         session_mgr = MagicMock()
         artifact_store = MagicMock()

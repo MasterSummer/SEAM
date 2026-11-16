@@ -94,6 +94,52 @@ test('prompt bundles round artifacts and suggestions together, with an explicit 
   assert.ok(oversized.includes('fixture-sha'), 'an over-budget prompt is still rendered and sent')
 })
 
+test('timeout analysis prompt exposes process metadata and workload-matched profiles', async context => {
+  const { root, bridge, execution } = await fixture(context)
+  const evaluationDir = join(root, 'evaluation')
+  const profileRoot = join(evaluationDir, 'profile')
+  await mkdir(join(profileRoot, 'case-002_ref'), { recursive: true })
+  await mkdir(join(profileRoot, 'case-002_sol'), { recursive: true })
+  await writeFile(join(evaluationDir, 'process.json'), '{"pid":42,"timeout_seconds":30}\n')
+  await writeFile(join(profileRoot, 'case-002_ref', 'profile.json'), '{}')
+  await writeFile(join(profileRoot, 'case-002_sol', 'profile.json'), '{}')
+  const indexPath = join(evaluationDir, 'diagnostic_artifacts.json')
+  await writeFile(indexPath, JSON.stringify({
+    schema_version: 1,
+    evaluation_dir: evaluationDir,
+    directories: {
+      profile: { path: profileRoot, status: 'populated', file_count: 2, total_size_bytes: 4 },
+      work: { path: join(evaluationDir, 'work'), status: 'missing', file_count: 0, total_size_bytes: 0 },
+    },
+    files: [
+      { kind: 'evaluator_artifact', relative_path: 'process.json', path: join(evaluationDir, 'process.json'), size_bytes: 30 },
+      { kind: 'profile_artifact', relative_path: 'profile/case-002_ref/profile.json', path: join(profileRoot, 'case-002_ref', 'profile.json'), size_bytes: 2, workload_uuid: 'case-002', profile_role: 'reference' },
+      { kind: 'profile_artifact', relative_path: 'profile/case-002_sol/profile.json', path: join(profileRoot, 'case-002_sol', 'profile.json'), size_bytes: 2, workload_uuid: 'case-002', profile_role: 'candidate' },
+    ],
+  }))
+  execution.phase = { id: 'analyze_operator_failure', agent: 'error_analyzer', prompt_template: 'phase_operator_error_analysis' }
+  execution.scope.loop_state.evaluate_operator = {
+    evaluation_status: 'timeout',
+    process_metadata_path: join(evaluationDir, 'process.json'),
+    diagnostic_artifacts_path: indexPath,
+    timeout_workload: { index: 1, uuid: 'case-002', is_inferred: true },
+  }
+  execution.input = {
+    runtime_report: '{}',
+    runtime_configuration: '{}',
+    evaluation_result: JSON.stringify(execution.scope.loop_state.evaluate_operator),
+    evaluation_classification: JSON.stringify({ repair_role: 'timeout_analyzer', timeout_kind: 'partial_trace' }),
+  }
+
+  const prompt = await bridge.render(execution)
+
+  assert.ok(prompt.includes('"pid":42'))
+  assert.ok(prompt.includes(indexPath))
+  assert.ok(prompt.includes(join(profileRoot, 'case-002_ref', 'profile.json')))
+  assert.ok(prompt.includes(join(profileRoot, 'case-002_sol', 'profile.json')))
+  assert.ok(prompt.includes('partial_trace'))
+})
+
 test('project prompt rendering receives generic phase, project, mapped input and prior state', async context => {
   const { bridge, execution } = await fixture(context)
   execution.phase = { id: 'phase_0_env_detect', name: 'Environment detection', prompt_template: 'phase_0_env_detect', type: 'llm' }
@@ -115,6 +161,22 @@ test('project repair classification validator uses the fixed repair-role contrac
   const invalid = await bridge.validate(execution, { status: 'success', output: { category: '', root_cause: '', suggested_fix: '', repair_role: 'unknown' } })
   assert.equal(invalid.status, 'failure')
   assert.equal((invalid.output.validation_errors as string[]).length, 4)
+})
+
+test('operator error analysis validator is available through the bridge without requiring a probe', async context => {
+  const { bridge, execution } = await fixture(context)
+  execution.phase.validator = 'operator_error_analysis'
+  const output = {
+    category: 'unknown', root_cause: '', repair_role: 'none',
+    evaluation_valid: false, requires_clean_rerun: true, operator_code_evidence: false,
+    suggested_fix: '', failed_workloads: [], evidence: [], missing_evidence: [],
+    hypotheses: [], next_verification: [], handoff: 'Collect one focused profile.',
+  }
+  const valid = await bridge.validate(execution, { status: 'success', output })
+  assert.equal(valid.status, 'success')
+  const invalid = await bridge.validate(execution, { status: 'success', output: { ...output, repair_role: 'timeout_analyzer' } })
+  assert.equal(invalid.status, 'failure')
+  assert.ok((invalid.output.validation_errors as string[]).some(error => error.includes('repair_role')))
 })
 
 test('operator failure evidence agrees with Python without diagnostic string heuristics', () => {

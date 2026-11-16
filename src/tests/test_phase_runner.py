@@ -773,6 +773,37 @@ def test_run_phase_0_to_1_returns_outputs(tmp_path: Path) -> None:
     assert "phase_1_project_analysis" in outputs
 
 
+def test_phase_runner_registers_operator_error_analysis_validator(tmp_path: Path) -> None:
+    engine = ValidatorEngine()
+    _ = PhaseRunner(
+        NoopSessionManager(),
+        ArtifactStore(str(tmp_path), "error-analysis-validator"),
+        PromptLoader(),
+        engine,
+    )
+
+    result = engine.validate(
+        "operator_error_analysis",
+        {
+            "category": "unknown",
+            "root_cause": "",
+            "repair_role": "none",
+            "evaluation_valid": False,
+            "requires_clean_rerun": True,
+            "operator_code_evidence": False,
+            "suggested_fix": "",
+            "failed_workloads": [],
+            "evidence": [],
+            "missing_evidence": [],
+            "hypotheses": [],
+            "next_verification": [],
+            "handoff": "Run a focused diagnostic before repairing.",
+        },
+    )
+
+    assert result.passed is True
+
+
 def test_run_phase_0_to_1_accepts_user_constraints() -> None:
     import inspect
 

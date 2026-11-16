@@ -13,6 +13,7 @@ from core.workflow_condition_policy import (
     evaluate_condition,
 )
 from core.workflow_transition_policy import TransitionRequest, plan_next_phase
+from core.workflow_stop_policy import StopCondition, select_stop_status
 
 
 def _evaluate_request(
@@ -179,6 +180,34 @@ def test_valid_comparisons_match_on_both_paths(
 
     # Then
     assert decision == ConditionDecision(expected, None)
+
+
+def test_field_references_preserve_strings_types_and_nested_values() -> None:
+    request = ConditionRequest(
+        "$.quoted == $.quoted and $.numeric_text != 3 and "
+        "$.analysis.repair_role == 'operator_fixer'",
+        {},
+        {},
+        {"quoted": "x' or true or 'x", "numeric_text": "3"},
+        {},
+        {"analysis": {"repair_role": "operator_fixer"}},
+        {},
+    )
+
+    decision = evaluate_condition(request, lambda value: value, lambda value: value)
+
+    assert decision == ConditionDecision(True, None)
+
+
+def test_stop_condition_resolves_nested_role_without_interpolating_string() -> None:
+    decision = select_stop_status(
+        [StopCondition("$.error_analysis.repair_role == 'none'", "failure")],
+        {"error_analysis": {"repair_role": "none"}},
+        {},
+    )
+
+    assert decision.status == "failure"
+    assert decision.evaluation_errors == ()
 
 
 @pytest.mark.parametrize(

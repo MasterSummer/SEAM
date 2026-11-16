@@ -155,7 +155,7 @@ cat > "$PATCH" <<EOF
         maxPromptBytes: 262144
         roleTools:
           main_engineer: [read, write, edit, glob, grep, bash]
-          error_analyzer: [read, glob, grep]
+          error_analyzer: [read, glob, grep, bash]
           operator_fixer: [read, write, edit, glob, grep, bash]
           operator_environment_fixer: [read, write, edit, glob, grep, bash]
         roleOptions:

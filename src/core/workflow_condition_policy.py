@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import re
 from collections.abc import Callable, Mapping
-from typing import NamedTuple
+from typing import NamedTuple, cast
 
 from core.workflow_condition_parser import (
     ConditionEvaluationError as ConditionEvaluationError,
@@ -26,6 +26,42 @@ class ConditionRequest(NamedTuple):
 class ConditionDecision(NamedTuple):
     matched: bool
     evaluation_error: str | None
+
+
+def replace_condition_field_references(
+    expression: str,
+    sources: tuple[Mapping[str, ConditionValue], ...],
+    environment: dict[str, ConditionValue],
+) -> str:
+    """Bind $.field.path references as values instead of source-code text."""
+    path_pattern = re.compile(r"\$\.([\w]+(?:\.[\w]+)*)")
+    missing = object()
+    next_index = 0
+
+    def replace(match: re.Match[str]) -> str:
+        nonlocal next_index
+        path = match.group(1).split(".")
+        value: ConditionValue = ".".join(path)
+        for source in sources:
+            candidate: object = source
+            for part in path:
+                if not isinstance(candidate, Mapping) or part not in candidate:
+                    candidate = missing
+                    break
+                candidate = candidate[part]
+            if candidate is not missing:
+                value = cast(ConditionValue, candidate)
+                break
+
+        while True:
+            name = f"__seam_condition_field_{next_index}"
+            next_index += 1
+            if name not in environment and name not in expression:
+                break
+        environment[name] = value
+        return name
+
+    return path_pattern.sub(replace, expression)
 
 
 def select_condition_evaluation_mode(
@@ -60,25 +96,6 @@ def evaluate_condition(
     if not isinstance(resolved, str):
         return ConditionDecision(bool(resolved), None)
 
-    def replace_field(match: re.Match[str]) -> str:
-        name = match.group(1)
-        for source in (
-            request.step_outputs,
-            request.workflow_globals,
-            request.context,
-            request.loop_state,
-        ):
-            if name in source:
-                value = source[name]
-                return value if isinstance(value, str) else json.dumps(value)
-        return repr(name)
-
-    expression = re.sub(r"\$\.(\w+)", replace_field, resolved)
-    lowered = expression.lower()
-    if lowered in ("true", "1"):
-        return ConditionDecision(True, None)
-    if lowered in ("false", "0", ""):
-        return ConditionDecision(False, None)
     environment = {
         **request.state,
         **request.workflow_globals,
@@ -87,6 +104,21 @@ def evaluate_condition(
         **request.loop_variables,
         **request.step_outputs,
     }
+    expression = replace_condition_field_references(
+        resolved,
+        (
+            request.step_outputs,
+            request.workflow_globals,
+            request.context,
+            request.loop_state,
+        ),
+        environment,
+    )
+    lowered = expression.lower()
+    if lowered in ("true", "1"):
+        return ConditionDecision(True, None)
+    if lowered in ("false", "0", ""):
+        return ConditionDecision(False, None)
     try:
         mode = select_condition_evaluation_mode(request.workflow_globals)
         return ConditionDecision(

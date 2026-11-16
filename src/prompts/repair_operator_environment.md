@@ -9,6 +9,17 @@ Do not use CPU fallback or replace vendor torch/torch_npu/CANN packages.
 - Runtime report: `{runtime_report}`
 - Runtime configuration: `{runtime_configuration}`
 - Error analysis: `{error_analysis}`
+- Evaluator result: `{evaluation_result}`
+- Evaluation classification: `{evaluation_classification}`
+- Diagnostic artifact index path: `{diagnostic_artifacts_path}`
+- Process metadata (`process.json`):
+  ```json
+  {operator_process_metadata_text}
+  ```
+- Indexed evaluator/profile/work files:
+  ```json
+  {operator_diagnostic_artifacts_text}
+  ```
 - Operator task directory: `{operator_task_dir}`
 - KernelBench root: `{kernelbench_root}`
 
@@ -16,8 +27,10 @@ Inspect the current evidence before changing anything. In scope are run-scoped e
 
 After any change, run the supplied runtime/evaluator preflight if available. If the evidence indicates an operator source, compile, or numerical defect rather than an environment defect, make no code change and hand off to `operator_fixer`.
 
-Do not infer an environment root cause from a timeout alone. Identify the current
-run, failing stage and supporting artifact before changing anything. Limit process
+Do not infer an environment root cause from a timeout alone. Inspect the listed
+trace, process metadata, stdout/stderr, resource snapshots, work files and
+profiling files; identify the current run, failing stage and supporting artifact
+before changing anything. Limit process
 and cache cleanup to resources proven to belong to this run; if ownership is
 unknown, report the uncertainty instead of killing processes or deleting shared
 state. Record each check's command, exit status and log path. If no execution host

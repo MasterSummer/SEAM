@@ -9,7 +9,7 @@ import type { Scope, Workflow } from '../src/types.js'
 
 const repository = fileURLToPath(new URL('../../../', import.meta.url))
 const scope: Scope = {
-  state: { shared: 'state', phase: { ok: true } }, context: { shared: 'context', zero: 0 },
+  state: { shared: 'state', phase: { ok: true } }, context: { shared: 'context', zero: 0, quoted: "x' or true or 'x", numericText: '3' },
   globals: { shared: 'global', threshold: 3 }, loop_vars: { shared: 'variable' },
   loop_state: { shared: 'loop', count: 3, operator_passed: false, error_analysis: { repair_role: 'operator_fixer' }, evaluation_classification: { repair_role: 'operator_environment_fixer' } },
   step_outputs: { shared: 'step', phase: { ok: false }, items: [1, 2] }, loop_history: [{ iteration: 1 }],
@@ -49,7 +49,7 @@ test('reference interpolation matches Python scope, type and default semantics',
 
 test('phase and stop conditions match both Python evaluation modes', async () => {
   const workflow = parse(await readFile(new URL('../../../src/workflows/npu_kernelbench_custom_op.yaml', import.meta.url), 'utf8')) as Workflow
-  const expressions = ['true', 'TRUE', 'false', '0', '1', '', '${phase.ok}', '${missing}', '${loop_state.count} >= 3', '$.count >= 3', 'shared == step', 'true or false and false', 'true or 1 < null', 'not false', "'x' in 'xyz'", '1 == true', 'null == false', '1 < 2 < 3', "'x' not in 'abc'", '(', '@', "'unterminated", 'true garbage', ...workflow.phases.flatMap(phase => phase.condition ? [phase.condition] : []), ...Object.values(workflow.sub_workflows ?? {}).flatMap(loop => [...loop.phases.flatMap(phase => phase.condition ? [phase.condition] : []), ...(loop.stop_conditions ?? []).map(stop => stop.condition)])]
+  const expressions = ['true', 'TRUE', 'false', '0', '1', '', '${phase.ok}', '${missing}', '${loop_state.count} >= 3', '$.count >= 3', '$.quoted == $.quoted', "$.quoted == 'expected'", '$.numericText == 3', "$.error_analysis.repair_role == 'operator_fixer'", "$.error_analysis.repair_role == 'none'", 'shared == step', 'true or false and false', 'true or 1 < null', 'not false', "'x' in 'xyz'", '1 == true', 'null == false', '1 < 2 < 3', "'x' not in 'abc'", '(', '@', "'unterminated", 'true garbage', ...workflow.phases.flatMap(phase => phase.condition ? [phase.condition] : []), ...Object.values(workflow.sub_workflows ?? {}).flatMap(loop => [...loop.phases.flatMap(phase => phase.condition ? [phase.condition] : []), ...(loop.stop_conditions ?? []).map(stop => stop.condition)])]
   const cases = [false, true].flatMap(enhanced => expressions.flatMap(expression => [false, true].map(stop => ({ expression, scope: { ...scope, globals: { ...scope.globals, ...(enhanced ? { review_fail_closed: true } : {}) } }, stop }))))
   const expected = python(cases)
   cases.forEach((entry, index) => {

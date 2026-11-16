@@ -10,7 +10,7 @@ export const operatorOperations = new Set([
 
 export const supportedValidators = new Set([
   'constraint_summary', 'entry_script', 'entry_static', 'env_detect', 'operator_analysis',
-  'operator_env_detect', 'operator_evaluation', 'operator_report', 'operator_runtime_configure',
+  'operator_env_detect', 'operator_error_analysis', 'operator_evaluation', 'operator_report', 'operator_runtime_configure',
   'operator_runtime_detect', 'project_analysis', 'repair_classification', 'reports', 'rule_migration', 'validation_final', 'venv',
 ])
 

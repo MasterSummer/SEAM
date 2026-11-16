@@ -192,6 +192,13 @@ def run_kernelbench_eval(
     visible_device = runtime_env.get("ASCEND_RT_VISIBLE_DEVICES", "").strip()
     if visible_device and "," not in visible_device and visible_device.isdigit() and "--npu-ids" not in command:
         command.extend(["--npu-ids", visible_device])
+    runner_mode = "persistent"
+    try:
+        npu_ids = command[command.index("--npu-ids") + 1].split(",")
+    except (ValueError, IndexError):
+        npu_ids = ["0"]
+    npu_ids = [item.strip() for item in npu_ids if item.strip()] or ["0"]
+    runner_worker_count = len(npu_ids)
     lock_path = _evaluator_lock_path(root, runtime_env)
     lock_file = lock_path.open("a+", encoding="utf-8")
     fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
@@ -227,6 +234,9 @@ def run_kernelbench_eval(
         "command": command,
         "timeout_seconds": timeout,
         "workload_timeout_seconds": workload_timeout,
+        "runner_mode": runner_mode,
+        "npu_ids": npu_ids,
+        "runner_worker_count": runner_worker_count,
         "cwd": str(root),
         "traces_path": str(traces),
         "runtime_env_file": str(runtime_env_file) if runtime_env_file else "",
@@ -263,6 +273,9 @@ def run_kernelbench_eval(
             "process_metadata_path": str(traces.with_name("process.json")),
             "evaluator_lock": str(lock_path),
             "timeout_classification": "",
+            "runner_mode": runner_mode,
+            "npu_ids": npu_ids,
+            "runner_worker_count": runner_worker_count,
             "resource_before": process_metadata["resource_before"],
             "resource_after": resource_after,
             "work_dir": str(work_dir),
@@ -298,6 +311,9 @@ def run_kernelbench_eval(
             "process_metadata_path": str(traces.with_name("process.json")),
             "evaluator_lock": str(lock_path),
             "timeout_classification": timeout_classification,
+            "runner_mode": runner_mode,
+            "npu_ids": npu_ids,
+            "runner_worker_count": runner_worker_count,
             "resource_before": process_metadata["resource_before"],
             "resource_after": resource_after,
             "work_dir": str(work_dir),
@@ -539,13 +555,41 @@ def evaluate_and_summarize_operator(
         traces = _read_jsonl(traces_path)
         result["executed_count"] = len(traces)
         result["not_run_count"] = expected_workloads - len(traces)
+        result["trace_sequence"], result["trace_sequence_omitted_count"] = (
+            _trace_sequence_digest(
+                traces,
+                Path(task_dir) / "workload.jsonl",
+            )
+        )
         failing, failing_count = _failing_workload_digest(traces)
         result["failing_workload_count"] = failing_count
         result["failing_workloads"] = failing
         result["first_failure_workload"] = failing[0]["index"] if failing else ""
     else:
+        traces = []
         result["executed_count"] = 0
         result["not_run_count"] = expected_workloads
+        result["trace_sequence"] = []
+        result["trace_sequence_omitted_count"] = 0
+    trace_timeout_count = sum(
+        _status(trace).upper() in {"TIMEOUT", "TIMED_OUT", "TIMEOUT_ERROR"}
+        for trace in traces
+    )
+    result["timeout_trace_count"] = trace_timeout_count
+    if trace_timeout_count:
+        result["failure_category"] = result.get("failure_category") or "partial_trace_timeout"
+        result["timeout_classification"] = (
+            result.get("timeout_classification") or "runner_workload_timeout"
+        )
+    result["timeout_workload"] = _select_timeout_workload(
+        Path(task_dir) / "workload.jsonl",
+        traces,
+        timed_out=(
+            result.get("evaluation_status") == "timeout" or trace_timeout_count > 0
+        ),
+        runner_mode=str(result.get("runner_mode") or "unknown"),
+        runner_worker_count=int(result.get("runner_worker_count") or 0),
+    )
     result["evaluation_valid"] = bool(
         result.get("evaluation_status") == "completed"
         and result.get("trace_complete")
@@ -556,6 +600,18 @@ def evaluate_and_summarize_operator(
             result["failure_category"] = result.get("timeout_classification", "timeout")
         elif not result.get("evaluation_valid"):
             result["failure_category"] = "incomplete_trace"
+    artifact_index = _index_diagnostic_artifacts(
+        evaluation_dir,
+        timeout_workload=result.get("timeout_workload"),
+    )
+    artifact_index_path = evaluation_dir / "diagnostic_artifacts.json"
+    artifact_index_path.write_text(
+        json.dumps(artifact_index, ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
+    )
+    result["diagnostic_artifacts_path"] = str(artifact_index_path)
+    result["profile_file_count"] = artifact_index["directories"]["profile"]["file_count"]
+    result["work_file_count"] = artifact_index["directories"]["work"]["file_count"]
     manifest = build_failure_manifest(result, traces_path, snapshot_path)
     manifest["candidate_manifest"] = candidate_manifest
     manifest_path = evaluation_dir / "failure_manifest.json"
@@ -686,12 +742,20 @@ def build_failure_manifest(
         "failure_category": result.get("failure_category", ""),
         "exit_code": result.get("exit_code"),
         "timeout_classification": result.get("timeout_classification", ""),
+        "timeout_trace_count": result.get("timeout_trace_count", 0),
+        "runner_mode": result.get("runner_mode", ""),
+        "npu_ids": result.get("npu_ids", []),
+        "runner_worker_count": result.get("runner_worker_count", 0),
         "cleanup_status": result.get("cleanup_status", ""),
         "visible_device": result.get("visible_device", ""),
         "resource_before": result.get("resource_before", {}),
         "resource_after": result.get("resource_after", {}),
         "work_dir": result.get("work_dir", ""),
         "profile_dir": result.get("profile_dir", ""),
+        "process_metadata_path": result.get("process_metadata_path", ""),
+        "diagnostic_artifacts_path": result.get("diagnostic_artifacts_path", ""),
+        "profile_file_count": result.get("profile_file_count", 0),
+        "work_file_count": result.get("work_file_count", 0),
         "solution_sha256": solution_hash,
         "evaluated_solution_path": result.get("evaluated_solution_path", ""),
         "evaluated_solution_sha256": result.get("evaluated_solution_sha256", ""),
@@ -717,6 +781,9 @@ def build_failure_manifest(
         "evaluation_scope": result.get("evaluation_scope", "unknown"),
         "evaluation_completeness": result.get("evaluation_completeness", "unknown"),
         "first_failure_workload": result.get("first_failure_workload", ""),
+        "timeout_workload": result.get("timeout_workload"),
+        "trace_sequence": result.get("trace_sequence", []),
+        "trace_sequence_omitted_count": result.get("trace_sequence_omitted_count", 0),
         "cascade_failure_count": result.get("cascade_failure_count", 0),
     }
 
@@ -802,6 +869,63 @@ def classify_operator_evaluation(result: dict[str, Any]) -> dict[str, Any]:
             "evaluation_completeness": "not_evaluated",
             "requires_single_workload_debug": False,
         }
+    if (
+        str(result.get("evaluation_status") or "") == "timeout"
+        or category in {"timeout", "device_sync_hang", "no_trace_timeout", "partial_trace_timeout"}
+    ):
+        executed = int(result.get("executed_count") or 0)
+        timeout_workload = result.get("timeout_workload")
+        if not isinstance(timeout_workload, dict):
+            failing = result.get("failing_workloads") or []
+            timeout_workload = next(
+                (
+                    row
+                    for row in failing
+                    if isinstance(row, dict)
+                    and str(row.get("status") or "").upper()
+                    in {"TIMEOUT", "TIMED_OUT", "TIMEOUT_ERROR"}
+                ),
+                None,
+            )
+        timeout_index = (
+            timeout_workload.get("index")
+            if isinstance(timeout_workload, dict)
+            else None
+        )
+        try:
+            timeout_index = int(timeout_index)
+        except (TypeError, ValueError):
+            timeout_index = None
+        selection_basis = (
+            str(timeout_workload.get("selection_basis") or "")
+            if isinstance(timeout_workload, dict)
+            else ""
+        )
+        timeout_kind = (
+            "post_workload_cleanup"
+            if selection_basis == "outer_timeout_after_all_workload_traces"
+            else "first_workload"
+            if timeout_index == 0
+            else "no_trace"
+            if executed == 0 and timeout_index is None
+            else "partial_trace"
+        )
+        workload_is_identified = (
+            isinstance(timeout_workload, dict)
+            and timeout_workload.get("index") is not None
+            and bool(timeout_workload.get("uuid"))
+        )
+        return {
+            "category": "timeout",
+            "timeout_kind": timeout_kind,
+            "timeout_classification": result.get("timeout_classification") or category or "timeout",
+            "repair_role": "timeout_analyzer",
+            "evaluation_completeness": completeness,
+            "requires_single_workload_debug": workload_is_identified,
+            "requires_instrumented_probe": True,
+            "first_failure_workload": result.get("first_failure_workload", ""),
+            "timeout_workload": timeout_workload,
+        }
     if category in {"resource_exhausted", "staging_missing", "cleanup_failed"}:
         return {
             "category": category,
@@ -826,33 +950,6 @@ def classify_operator_evaluation(result: dict[str, Any]) -> dict[str, Any]:
             "evaluation_completeness": completeness,
             "requires_single_workload_debug": True,
             "first_failure_workload": result.get("first_failure_workload", ""),
-        }
-    # Timeout is its own failure class: analyze where it hangs first, never
-    # send it straight back to the code fixer.
-    if (
-        str(result.get("evaluation_status") or "") == "timeout"
-        or category in {"device_sync_hang", "no_trace_timeout", "partial_trace_timeout"}
-    ):
-        failing = result.get("failing_workloads") or []
-        first = failing[0] if failing and isinstance(failing[0], dict) else {}
-        executed = int(result.get("executed_count") or 0)
-        timeout_kind = "no_trace" if executed == 0 else (
-            "first_workload" if executed <= 1 else "partial_trace"
-        )
-        return {
-            "category": "timeout",
-            "timeout_kind": timeout_kind,
-            "timeout_classification": result.get("timeout_classification", category),
-            "repair_role": "timeout_analyzer",
-            "evaluation_completeness": completeness,
-            "requires_single_workload_debug": True,
-            "requires_instrumented_probe": True,
-            "first_failure_workload": result.get("first_failure_workload", ""),
-            "timeout_workload": {
-                "index": first.get("index"),
-                "inputs": first.get("inputs"),
-                "status": first.get("status"),
-            } if first else None,
         }
     if category in {"compile_error", "incomplete_trace"}:
         return {
@@ -1353,6 +1450,462 @@ def _read_jsonl(path: Path) -> list[dict[str, Any]]:
     return traces
 
 
+def _workload_input_summary(workload: Any) -> dict[str, Any]:
+    if not isinstance(workload, dict):
+        return {}
+    inputs = workload.get("inputs") or {}
+    if not isinstance(inputs, dict):
+        return {}
+    summary: dict[str, Any] = {}
+    for name, spec in inputs.items():
+        if not isinstance(spec, dict):
+            continue
+        if spec.get("shape"):
+            summary[str(name)] = {
+                "shape": spec.get("shape"),
+                "dtype": spec.get("dtype"),
+            }
+        elif spec.get("type") == "scalar":
+            summary[str(name)] = spec.get("value")
+    return summary
+
+
+def _select_timeout_workload(
+    workload_path: Path,
+    traces: list[dict[str, Any]],
+    *,
+    timed_out: bool,
+    runner_mode: str = "unknown",
+    runner_worker_count: int = 0,
+) -> dict[str, Any] | None:
+    workloads: list[dict[str, Any]] = []
+    if workload_path.is_file():
+        try:
+            workloads = _read_jsonl(workload_path)
+        except (OSError, json.JSONDecodeError):
+            workloads = []
+
+    timeout_traces: list[tuple[int, dict[str, Any], dict[str, Any], str]] = []
+    for index, trace in enumerate(traces):
+        status = _status(trace).upper()
+        if status not in {"TIMEOUT", "TIMED_OUT", "TIMEOUT_ERROR"}:
+            continue
+        workload = trace.get("workload")
+        if not isinstance(workload, dict) and index < len(workloads):
+            workload = workloads[index]
+        if not isinstance(workload, dict):
+            workload = {}
+        evaluation = trace.get("evaluation")
+        log = str(evaluation.get("log") or "") if isinstance(evaluation, dict) else ""
+        timeout_traces.append((index, trace, workload, log))
+
+    def workload_record(
+        index: int, trace: dict[str, Any], workload: dict[str, Any], status: str
+    ) -> dict[str, Any]:
+        return {
+            "index": index,
+            "uuid": workload.get("uuid") or trace.get("uuid") or trace.get("workload_id", ""),
+            "inputs": _workload_input_summary(workload),
+            "status": status,
+        }
+
+    synthetic_timeouts = [
+        (index, trace, workload, log)
+        for index, trace, workload, log in timeout_traces
+        if "(or worker crashed)" in log.lower()
+    ]
+    if synthetic_timeouts:
+        if runner_mode == "persistent" and runner_worker_count == 1:
+            index, trace, workload, log = synthetic_timeouts[0]
+            selected = workload_record(index, trace, workload, "TIMEOUT")
+            return {
+                **selected,
+                "selection_basis": "first_unreturned_single_worker_batch",
+                "is_inferred": True,
+                "is_ambiguous": False,
+                "trace_status_is_synthetic": True,
+                "inference_evidence": log[:240],
+                "synthetic_timeout_count": len(synthetic_timeouts),
+            }
+
+        worker_count = max(1, runner_worker_count)
+        first_by_worker: dict[int, tuple[int, dict[str, Any], dict[str, Any], str]] = {}
+        for item in synthetic_timeouts:
+            first_by_worker.setdefault(item[0] % worker_count, item)
+        candidates = [
+            workload_record(index, trace, workload, "TIMEOUT")
+            for index, trace, workload, _ in sorted(first_by_worker.values())
+        ]
+        first = candidates[0]
+        return {
+            **first,
+            "selection_basis": "first_unreturned_parallel_worker_batches",
+            "is_inferred": True,
+            "is_ambiguous": len(candidates) > 1 or runner_mode != "persistent",
+            "trace_status_is_synthetic": True,
+            "candidate_workloads": candidates,
+            "synthetic_timeout_count": len(synthetic_timeouts),
+        }
+
+    if timeout_traces:
+        index, trace, workload, _ = timeout_traces[0]
+        return {
+            **workload_record(index, trace, workload, _status(trace).upper()),
+            "selection_basis": "timeout_trace",
+            "is_inferred": False,
+            "is_ambiguous": False,
+            "trace_status_is_synthetic": False,
+        }
+
+    if not timed_out:
+        return None
+    if not traces:
+        return {
+            "index": None,
+            "uuid": "",
+            "inputs": {},
+            "status": "UNKNOWN_NO_TRACE",
+            "selection_basis": "outer_timeout_before_any_trace",
+            "is_inferred": True,
+            "is_ambiguous": True,
+            "trace_status_is_synthetic": False,
+        }
+    if len(traces) >= len(workloads):
+        return {
+            "index": None,
+            "uuid": "",
+            "inputs": {},
+            "status": "ALL_WORKLOADS_RECORDED_BEFORE_TIMEOUT",
+            "selection_basis": "outer_timeout_after_all_workload_traces",
+            "is_inferred": True,
+            "is_ambiguous": True,
+            "trace_status_is_synthetic": False,
+        }
+    index = len(traces)
+    workload = workloads[index]
+    return {
+        "index": index,
+        "uuid": workload.get("uuid", ""),
+        "inputs": _workload_input_summary(workload),
+        "status": "NOT_RECORDED_AT_TIMEOUT",
+        "selection_basis": "next_unrecorded_workload",
+        "is_inferred": True,
+        "is_ambiguous": runner_mode != "persistent" or runner_worker_count > 1,
+        "trace_status_is_synthetic": False,
+    }
+
+
+def _trace_sequence_digest(
+    traces: list[dict[str, Any]], workload_path: Path, *, max_entries: int = 200
+) -> tuple[list[dict[str, Any]], int]:
+    """Keep workload ordering visible without copying full trace payloads."""
+    workloads: list[dict[str, Any]] = []
+    if workload_path.is_file():
+        try:
+            workloads = _read_jsonl(workload_path)
+        except (OSError, json.JSONDecodeError):
+            workloads = []
+
+    sequence: list[dict[str, Any]] = []
+    for index, trace in enumerate(traces[:max_entries]):
+        workload = trace.get("workload")
+        if not isinstance(workload, dict) and index < len(workloads):
+            workload = workloads[index]
+        if not isinstance(workload, dict):
+            workload = {}
+        evaluation = trace.get("evaluation")
+        if not isinstance(evaluation, dict):
+            evaluation = {}
+        log = str(evaluation.get("log") or evaluation.get("error") or "")
+        sequence.append(
+            {
+                "index": index,
+                "uuid": workload.get("uuid") or trace.get("uuid") or trace.get("workload_id", ""),
+                "status": _status(trace).upper(),
+                "inputs": _workload_input_summary(workload),
+                "trace_status_is_synthetic": "(or worker crashed)" in log.lower(),
+                "log_excerpt": log[:400],
+            }
+        )
+    return sequence, max(0, len(traces) - len(sequence))
+
+
+def _index_diagnostic_artifacts(
+    evaluation_dir: Path,
+    *,
+    max_files_per_directory: int = 1000,
+    timeout_workload: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Index saved evaluator/profile files without copying potentially large data."""
+    files: list[dict[str, Any]] = []
+    directories: dict[str, dict[str, Any]] = {}
+
+    for path in sorted(evaluation_dir.iterdir()):
+        if path.name == "runtime.env" or path.is_symlink() or not path.is_file():
+            continue
+        try:
+            files.append({
+                "kind": "evaluator_artifact",
+                "relative_path": str(path.relative_to(evaluation_dir)),
+                "path": str(path.resolve()),
+                "size_bytes": path.stat().st_size,
+            })
+        except OSError:
+            continue
+
+    profile_count = 0
+    profile_bytes = 0
+    profile_entries: list[dict[str, Any]] = []
+    work_count = 0
+    work_bytes = 0
+    work_artifact_count = 0
+    work_entries: list[dict[str, Any]] = []
+    targeted_profile_entries: list[dict[str, Any]] = []
+    other_profile_entries: list[dict[str, Any]] = []
+    profile_roots: set[str] = set()
+    timeout_workload_uuids = {
+        str(item.get("uuid"))
+        for item in (timeout_workload or {}).get("candidate_workloads", [])
+        if isinstance(item, dict) and item.get("uuid")
+    }
+    if isinstance(timeout_workload, dict) and timeout_workload.get("uuid"):
+        timeout_workload_uuids.add(str(timeout_workload["uuid"]))
+
+    def profile_identity(path: Path) -> tuple[str, str, str] | None:
+        parts = path.relative_to(evaluation_dir).parts
+        if parts[0] == "profile":
+            profile_index = 1
+        elif parts[0] == "work" and "profile" in parts[1:]:
+            profile_index = parts.index("profile", 1) + 1
+        else:
+            return None
+        if profile_index >= len(parts):
+            return None
+        profile_dir = parts[profile_index]
+        if profile_dir.endswith("_sol"):
+            return (profile_dir[:-4], "candidate", str(Path(*parts[:profile_index + 1])))
+        if profile_dir.endswith("_ref"):
+            return (profile_dir[:-4], "reference", str(Path(*parts[:profile_index + 1])))
+        return ("", "unknown", str(Path(*parts[:profile_index + 1])))
+
+    for name in ("profile", "work"):
+        root = evaluation_dir / name
+        if not root.is_dir() or root.is_symlink():
+            continue
+        for current, child_dirs, child_files in os.walk(root, followlinks=False):
+            current_path = Path(current)
+            child_dirs[:] = sorted(
+                directory
+                for directory in child_dirs
+                if not (current_path / directory).is_symlink()
+            )
+            for filename in sorted(child_files):
+                path = current_path / filename
+                if path.is_symlink() or not path.is_file():
+                    continue
+                try:
+                    size = path.stat().st_size
+                except OSError:
+                    continue
+                relative_path = str(path.relative_to(evaluation_dir))
+                identity = profile_identity(path)
+                if name == "work":
+                    work_count += 1
+                    work_bytes += size
+                if identity:
+                    workload_uuid, profile_role, profile_root = identity
+                    profile_count += 1
+                    profile_bytes += size
+                    profile_roots.add(profile_root)
+                    entry = {
+                        "kind": "profile_artifact",
+                        "relative_path": relative_path,
+                        "path": str(path.resolve()),
+                        "size_bytes": size,
+                        "profile_root": profile_root,
+                        "profile_role": profile_role,
+                    }
+                    if workload_uuid:
+                        entry["workload_uuid"] = workload_uuid
+                    if workload_uuid in timeout_workload_uuids:
+                        targeted_profile_entries.append(entry)
+                    elif len(other_profile_entries) < max_files_per_directory:
+                        other_profile_entries.append(entry)
+                elif name == "work":
+                    work_artifact_count += 1
+                    if len(work_entries) < max_files_per_directory:
+                        work_entries.append({
+                            "kind": "work_artifact",
+                            "relative_path": relative_path,
+                            "path": str(path.resolve()),
+                            "size_bytes": size,
+                        })
+
+    profile_entries = targeted_profile_entries + other_profile_entries
+    files.extend(profile_entries)
+    files.extend(work_entries)
+    profile_root = evaluation_dir / "profile"
+    work_root = evaluation_dir / "work"
+    directories["profile"] = {
+        "path": str(profile_root),
+        "discovered_roots": sorted(profile_roots),
+        "status": (
+            "missing"
+            if not profile_root.exists()
+            else "populated"
+            if profile_count
+            else "empty"
+        ),
+        "file_count": profile_count,
+        "total_size_bytes": profile_bytes,
+        "indexed_file_count": len(profile_entries),
+        "omitted_file_count": max(0, profile_count - len(profile_entries)),
+        "timeout_workload_uuids": sorted(timeout_workload_uuids),
+    }
+    directories["work"] = {
+        "path": str(work_root),
+        "status": "missing" if not work_root.exists() else "empty" if not work_count else "populated",
+        "file_count": work_count,
+        "total_size_bytes": work_bytes,
+        "work_artifact_file_count": work_artifact_count,
+        "indexed_file_count": len(work_entries),
+        "omitted_file_count": max(0, work_artifact_count - len(work_entries)),
+    }
+
+    return {
+        "schema_version": 1,
+        "evaluation_dir": str(evaluation_dir),
+        "directories": directories,
+        "files": files,
+    }
+
+
+def format_diagnostic_artifacts_context(
+    index_path: str | Path,
+    *,
+    timeout_workload: dict[str, Any] | None = None,
+    max_bytes: int = 10000,
+) -> str:
+    """Render a valid, size-bounded artifact listing with timeout evidence first."""
+    path = Path(index_path) if index_path else None
+    if path is None or not path.is_file():
+        return json.dumps(
+            {"index_path": str(index_path or ""), "status": "unavailable"},
+            ensure_ascii=False,
+        )
+    try:
+        index = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+        return json.dumps(
+            {"index_path": str(path), "status": "unreadable", "error": str(exc)},
+            ensure_ascii=False,
+        )
+    if not isinstance(index, dict):
+        return json.dumps(
+            {"index_path": str(path), "status": "invalid_index"},
+            ensure_ascii=False,
+        )
+
+    directories = index.get("directories")
+    if not isinstance(directories, dict):
+        directories = {}
+    entries = index.get("files")
+    if not isinstance(entries, list):
+        entries = []
+    workload_uuid = (
+        str(timeout_workload.get("uuid") or "")
+        if isinstance(timeout_workload, dict)
+        else ""
+    )
+    candidate_uuids = {
+        str(item.get("uuid") or "")
+        for item in timeout_workload.get("candidate_workloads", [])
+        if isinstance(item, dict) and item.get("uuid")
+    } if isinstance(timeout_workload, dict) else set()
+    if workload_uuid:
+        candidate_uuids.add(workload_uuid)
+
+    def rank(entry: dict[str, Any]) -> tuple[int, str]:
+        kind = str(entry.get("kind") or "")
+        relative = str(entry.get("relative_path") or "")
+        if kind == "evaluator_artifact" and Path(relative).name in {
+            "process.json",
+            "traces.jsonl",
+            "summary.json",
+            "failure_manifest.json",
+            "candidate_manifest.json",
+        }:
+            return (0, relative)
+        if candidate_uuids and (
+            entry.get("workload_uuid") in candidate_uuids
+            or any(candidate_uuid in relative for candidate_uuid in candidate_uuids)
+        ):
+            return (1, relative)
+        if kind == "evaluator_artifact":
+            return (2, relative)
+        if kind == "profile_artifact":
+            return (3, relative)
+        if kind == "work_artifact":
+            return (4, relative)
+        return (5, relative)
+
+    candidates = [item for item in entries if isinstance(item, dict)]
+    candidates.sort(key=rank)
+    rendered = {
+        "status": "available",
+        "index_path": str(path.resolve()),
+        "evaluation_dir": index.get("evaluation_dir", ""),
+        "timeout_workload_uuid": workload_uuid,
+        "timeout_workload_uuids": sorted(candidate_uuids),
+        "directories": directories,
+        "files": [],
+        "omitted_from_prompt": 0,
+        "full_index_note": "Read index_path for the complete indexed file list; files on disk may exceed the index cap.",
+    }
+
+    for entry in candidates:
+        compact_entry = {
+            key: entry[key]
+            for key in (
+                "kind",
+                "relative_path",
+                "path",
+                "size_bytes",
+                "workload_uuid",
+                "profile_role",
+                "profile_root",
+            )
+            if key in entry
+        }
+        rendered["files"].append(compact_entry)
+        rendered["omitted_from_prompt"] = len(candidates) - len(rendered["files"])
+        serialized = json.dumps(rendered, ensure_ascii=False, separators=(",", ":"))
+        if len(serialized.encode("utf-8")) > max_bytes:
+            rendered["files"].pop()
+            rendered["omitted_from_prompt"] = len(candidates) - len(rendered["files"])
+            break
+
+    serialized = json.dumps(rendered, ensure_ascii=False, indent=2)
+    while len(serialized.encode("utf-8")) > max_bytes and rendered["files"]:
+        rendered["files"].pop()
+        rendered["omitted_from_prompt"] = len(candidates) - len(rendered["files"])
+        serialized = json.dumps(rendered, ensure_ascii=False, indent=2)
+    if len(serialized.encode("utf-8")) > max_bytes:
+        rendered = {
+            "status": "available",
+            "index_path": str(path.resolve()),
+            "evaluation_dir": index.get("evaluation_dir", ""),
+            "timeout_workload_uuid": workload_uuid,
+            "timeout_workload_uuids": sorted(candidate_uuids),
+            "directories": directories,
+            "files": [],
+            "omitted_from_prompt": len(candidates),
+            "full_index_note": "Read index_path for the complete indexed file list; files on disk may exceed the index cap.",
+        }
+        serialized = json.dumps(rendered, ensure_ascii=False, separators=(",", ":"))
+    return serialized
+
+
 def _failing_workload_digest(traces: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], int]:
     """Compact failing-case digest used by the repair prompt."""
     failing: list[dict[str, Any]] = []
@@ -1362,15 +1915,7 @@ def _failing_workload_digest(traces: list[dict[str, Any]]) -> tuple[list[dict[st
             continue
         evaluation = trace.get("evaluation") or {}
         workload = trace.get("workload") or {}
-        inputs = workload.get("inputs") or {}
-        detail = {}
-        for name, spec in inputs.items():
-            if not isinstance(spec, dict):
-                continue
-            if spec.get("shape"):
-                detail[name] = {"shape": spec.get("shape"), "dtype": spec.get("dtype")}
-            elif spec.get("type") == "scalar":
-                detail[name] = spec.get("value")
+        detail = _workload_input_summary(workload)
         log = str(evaluation.get("log") or evaluation.get("error") or "")
         failing.append({
             "index": idx,

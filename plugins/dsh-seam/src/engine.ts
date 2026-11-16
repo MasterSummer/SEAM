@@ -242,6 +242,8 @@ export class WorkflowEngine {
     if (!Number.isSafeInteger(maximum) || maximum < 1 || !Number.isSafeInteger(threshold) || threshold < 1) throw new Error(`Invalid loop limits: ${name}`)
     for (let iteration = 1; iteration <= maximum; iteration++) {
       scope.loop_state.iteration = iteration
+      delete scope.loop_state.analyze_operator_failure
+      delete scope.loop_state.error_analysis
       scope.step_outputs = {}
       const dispatchTargets = new Set(loop.phases.filter(step => step.type === 'dispatch').flatMap(step => Object.values(dispatchRoutes(step))))
       let selected: string | undefined
@@ -264,7 +266,7 @@ export class WorkflowEngine {
           scope.loop_state.prepare_attempted = true
           scope.step_outputs.prepare_attempted = true
         }
-        const fields = step.id === 'evaluate_operator' ? ['operator_passed', 'evaluation_status', 'operator_pass_rate', 'workload_pass_rate', 'total_workloads', 'passed_workloads', 'failure_category', 'timeout_classification', 'cleanup_status', 'visible_device', 'failure_manifest_path', 'candidate_manifest_path', 'candidate_manifest', 'evaluation_scope', 'evaluation_completeness', 'first_failure_workload', 'cascade_failure_count', 'resource_before', 'resource_after', 'work_dir', 'profile_dir', 'traces_path', 'summary_path', 'stdout_path', 'stderr_path'] : step.type === 'builtin' && result.output.operation === 'operator_kernelbench_eval' ? ['operator_passed', 'evaluation_status', 'workload_pass_rate', 'operator_pass_rate'] : step.type === 'builtin' && result.output.operation === 'operator_evaluation_classify' ? ['category', 'repair_role', 'timeout_kind', 'requires_instrumented_probe', 'requires_single_workload_debug'] : []
+        const fields = step.id === 'evaluate_operator' ? ['operator_passed', 'evaluation_status', 'operator_pass_rate', 'workload_pass_rate', 'total_workloads', 'passed_workloads', 'failure_category', 'timeout_classification', 'cleanup_status', 'visible_device', 'failure_manifest_path', 'candidate_manifest_path', 'candidate_manifest', 'evaluation_scope', 'evaluation_completeness', 'first_failure_workload', 'cascade_failure_count', 'resource_before', 'resource_after', 'work_dir', 'profile_dir', 'traces_path', 'summary_path', 'stdout_path', 'stderr_path', 'process_metadata_path', 'diagnostic_artifacts_path', 'profile_file_count', 'work_file_count', 'executed_count', 'expected_workloads', 'timeout_workload'] : step.type === 'builtin' && result.output.operation === 'operator_kernelbench_eval' ? ['operator_passed', 'evaluation_status', 'workload_pass_rate', 'operator_pass_rate'] : step.type === 'builtin' && result.output.operation === 'operator_evaluation_classify' ? ['category', 'repair_role', 'timeout_kind', 'requires_instrumented_probe', 'requires_single_workload_debug', 'timeout_workload'] : []
         for (const field of fields) {
           if (Object.hasOwn(result.output, field)) {
             scope.loop_state[field] = result.output[field]

@@ -156,10 +156,27 @@ function evaluate(expression: string, environment: Record<string, unknown>, enha
   return result
 }
 
-function fields(expression: string, sources: Record<string, unknown>[]): string {
-  return expression.replace(/\$\.([\p{L}\p{N}_]+)/gu, (_, name: string) => {
-    for (const source of sources) if (Object.hasOwn(source, name)) return typeof source[name] === 'string' ? source[name] : JSON.stringify(source[name])
-    return `'${name}'`
+function fields(expression: string, sources: Record<string, unknown>[], environment: Record<string, unknown>): string {
+  const missing = Symbol('missing')
+  let nextIndex = 0
+  return expression.replace(/\$\.([\p{L}\p{N}_]+(?:\.[\p{L}\p{N}_]+)*)/gu, (_, path: string) => {
+    const parts = path.split('.')
+    let value: unknown = path
+    for (const source of sources) {
+      let candidate: unknown = source
+      for (const part of parts) {
+        if (!candidate || typeof candidate !== 'object' || Array.isArray(candidate) || !Object.hasOwn(candidate, part)) {
+          candidate = missing
+          break
+        }
+        candidate = (candidate as Record<string, unknown>)[part]
+      }
+      if (candidate !== missing) { value = candidate; break }
+    }
+    let name: string
+    do { name = `__seam_condition_field_${nextIndex++}` } while (Object.hasOwn(environment, name) || expression.includes(name))
+    environment[name] = value
+    return name
   })
 }
 
@@ -173,7 +190,7 @@ export function conditionDecision(expression: string, scope: Scope, stop = false
   if (typeof resolved !== 'string') return { matched: truth(resolved) }
   const sources = stop ? [scope.loop_state, scope.globals] : [scope.step_outputs, scope.globals, scope.context, scope.loop_state]
   const environment = stop ? { ...scope.globals, ...scope.loop_state } : { ...scope.state, ...scope.globals, ...scope.context, ...scope.loop_state, ...scope.loop_vars, ...scope.step_outputs }
-  try { return { matched: evaluate(fields(resolved, sources), environment, !stop && typeof scope.globals.review_fail_closed === 'boolean') } }
+  try { return { matched: evaluate(fields(resolved, sources, environment), environment, !stop && typeof scope.globals.review_fail_closed === 'boolean') } }
   catch (error) { return { matched: !stop, error: String(error) } }
 }
 

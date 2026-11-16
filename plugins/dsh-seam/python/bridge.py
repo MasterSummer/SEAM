@@ -105,6 +105,8 @@ def _compact_evaluation(evaluation):
         "evaluation_scope", "evaluation_completeness", "executed_count",
         "not_run_count", "failing_workload_count", "first_failure_workload",
         "reference_invalid", "timeout_classification", "cascade_failure_count",
+        "expected_workloads", "profile_file_count", "work_file_count",
+        "timeout_workload",
     ):
         if key in evaluation:
             out[key] = evaluation[key]
@@ -257,6 +259,7 @@ def builtin(request):
 
 def render(request):
     from core.prompt_loader import PromptLoader
+    from core.operator_benchmark import format_diagnostic_artifacts_context
     from core.runtime_skill_resolver import RuntimeSkillResolver
     from core.types import RuntimeSkillsConfig
 
@@ -315,6 +318,13 @@ def render(request):
         "operator_evaluation_text": read(evaluation.get("summary_path"), 7000) if evaluation.get("summary_path") else text(evaluation)[-7000:],
         "operator_stdout_text": read(evaluation.get("stdout_path"), 3500),
         "operator_stderr_text": read(evaluation.get("stderr_path"), 7000),
+        "operator_process_metadata_text": read(evaluation.get("process_metadata_path"), 4000, False),
+        "diagnostic_artifacts_path": evaluation.get("diagnostic_artifacts_path") or "(unavailable)",
+        "operator_diagnostic_artifacts_text": format_diagnostic_artifacts_context(
+            evaluation.get("diagnostic_artifacts_path", ""),
+            timeout_workload=evaluation.get("timeout_workload"),
+            max_bytes=10000,
+        ),
         "operator_error_analysis_text": text(_phase_summary(state.get("error_analysis", {})))[-5000:],
         **execution["input"],
     }
@@ -406,7 +416,7 @@ def validate(request):
     name = request["execution"]["phase"]["validator"]
     allowed = {
         "constraint_summary", "entry_script", "entry_static", "env_detect", "operator_analysis",
-        "operator_env_detect", "operator_evaluation", "operator_report", "operator_runtime_configure",
+        "operator_env_detect", "operator_error_analysis", "operator_evaluation", "operator_report", "operator_runtime_configure",
         "operator_runtime_detect", "project_analysis", "repair_classification", "reports", "rule_migration", "validation_final", "venv",
     }
     if name not in allowed:

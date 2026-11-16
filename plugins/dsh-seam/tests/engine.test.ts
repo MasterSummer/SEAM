@@ -105,6 +105,29 @@ test('stagnation uses captured evidence, not an analyzer invented signature', as
   assert.equal(loop.iteration, 2)
 })
 
+test('loop does not reuse an earlier analyzer role when current analysis is skipped', async context => {
+  const calls: string[] = []
+  const workflow: Workflow = {
+    name: 'iteration-scoped-analysis', version: 1, agents: { role: {} },
+    phases: [{ id: 'repair', type: 'loop', sub_workflow: 'repair' }],
+    sub_workflows: { repair: {
+      max_iterations: 2, stagnation_threshold: 10,
+      phases: [
+        { id: 'analyze_operator_failure', agent: 'role', output_as: 'error_analysis', condition: '${loop_state.iteration} == 1' },
+        { id: 'fix_operator', agent: 'role', condition: "${loop_state.error_analysis.repair_role} == 'operator_fixer'" },
+      ],
+    } },
+  }
+  const { engine } = await fixture(context, workflow, async execution => {
+    calls.push(execution.phase.id)
+    return success(execution.phase.id === 'analyze_operator_failure' ? { repair_role: 'operator_fixer' } : {})
+  })
+
+  await engine.run()
+
+  assert.deepEqual(calls, ['analyze_operator_failure', 'fix_operator'])
+})
+
 test('stop expression errors cannot accidentally declare success', async context => {
   const workflow: Workflow = { name: 'stop', version: 1, phases: [{ id: 'loop', type: 'loop', sub_workflow: 'repair' }], sub_workflows: { repair: { max_iterations: 1, stop_conditions: [{ condition: '(', status: 'success' }], phases: [{ id: 'probe', type: 'builtin' }] } } }
   const { engine, store } = await fixture(context, workflow, async () => success())

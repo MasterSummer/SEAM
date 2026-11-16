@@ -16,4 +16,10 @@ test('deployment overlay enables native workflow and role tools without enabling
   const plugin = patches.flatMap(patch => patch.insert ?? []).find(patch => patch.id === 'seam-workflow')
   assert.ok(plugin)
   for (const tools of Object.values(plugin.config.roleTools)) assert.ok(!tools.includes('seam_workflow'))
+  assert.ok(plugin.config.roleTools.error_analyzer?.includes('bash'))
+})
+
+test('KernelBench launcher grants bash to the failure analyzer for optional probes', async () => {
+  const source = await readFile(new URL('../../../src/scripts/run_operator_dsh.sh', import.meta.url), 'utf8')
+  assert.match(source, /error_analyzer: \[read, glob, grep, bash\]/)
 })

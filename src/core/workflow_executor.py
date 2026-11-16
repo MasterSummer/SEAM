@@ -135,6 +135,7 @@ from core.operator_benchmark import (
     configure_operator_runtime,
     detect_operator_runtime,
     evaluate_and_summarize_operator,
+    format_diagnostic_artifacts_context,
     summarize_traces,
     validate_operator_artifact,
     classify_operator_evaluation,
@@ -2275,6 +2276,19 @@ class WorkflowExecutor:
             error_analysis_text = json.dumps(
                 error_analysis, ensure_ascii=False, indent=2, default=str
             )
+            process_metadata_text = read_context_file(
+                str(evaluation.get("process_metadata_path", "")),
+                4000,
+                tail=False,
+            )
+            diagnostic_artifacts_path = str(
+                evaluation.get("diagnostic_artifacts_path", "")
+            )
+            diagnostic_artifacts_context = format_diagnostic_artifacts_context(
+                diagnostic_artifacts_path,
+                timeout_workload=evaluation.get("timeout_workload"),
+                max_bytes=10000,
+            )
             solution_path = str(loop_vars.get("OPERATOR_SOLUTION_PATH", ""))
             solution_root = Path(solution_path).parent if solution_path else Path(operator_task_dir)
             evaluation_text = read_context_file(str(evaluation.get("summary_path", "")), 7000)
@@ -2309,6 +2323,9 @@ class WorkflowExecutor:
                     "operator_stderr_text": read_context_file(
                         str(evaluation.get("stderr_path", "")), 7000
                     ),
+                    "operator_diagnostic_artifacts_text": diagnostic_artifacts_context,
+                    "operator_process_metadata_text": process_metadata_text,
+                    "diagnostic_artifacts_path": diagnostic_artifacts_path or "(unavailable)",
                     "operator_error_analysis_text": self._bounded_tail(
                         error_analysis_text, 5000
                     ),
@@ -4686,6 +4703,10 @@ class WorkflowExecutor:
         post_repair_validation_ran = False
         while iteration < max_iterations:
             iteration += 1
+            # Analyzer output is iteration-scoped; a skipped analysis cannot
+            # route the current repair from a previous diagnosis.
+            loop_state.pop("analyze_operator_failure", None)
+            loop_state.pop("error_analysis", None)
             # Conditions inside a sub-workflow receive loop_state before the
             # iteration is executed. Keep the current 1-based iteration
             # visible so first-pass generation and later repair passes can be
@@ -5917,6 +5938,13 @@ class WorkflowExecutor:
                         "summary_path",
                         "stdout_path",
                         "stderr_path",
+                        "process_metadata_path",
+                        "diagnostic_artifacts_path",
+                        "profile_file_count",
+                        "work_file_count",
+                        "executed_count",
+                        "expected_workloads",
+                        "timeout_workload",
                     ):
                         if key in phase_output:
                             step_outputs[key] = phase_output[key]

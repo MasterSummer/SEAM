@@ -827,6 +827,9 @@ def run_e2e_v3(
     from validators.validate_operator_env_detect import (
         validate as validate_operator_env_detect,
     )
+    from validators.validate_operator_error_analysis import (
+        validate as validate_operator_error_analysis,
+    )
     from validators.validate_operator_evaluation import (
         validate as validate_operator_evaluation,
     )
@@ -1095,6 +1098,9 @@ def run_e2e_v3(
             validator.register_validator("constraint_summary", validate_constraint_summary)
             validator.register_validator(
                 "operator_env_detect", validate_operator_env_detect
+            )
+            validator.register_validator(
+                "operator_error_analysis", validate_operator_error_analysis
             )
             validator.register_validator("operator_analysis", validate_operator_analysis)
             validator.register_validator(
