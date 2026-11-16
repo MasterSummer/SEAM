@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import Any
 
 from core.atomic_file import atomic_write_bytes
+from core.operator_solution import solution_payload_errors
 
 
 SUPPORTED_SOLUTION_TYPES = {"ascendc"}
@@ -85,8 +86,18 @@ def build_candidate_manifest(
             "content_present": True,
         }
         source_entries.append(source_entry)
-        materialized_path = solution_path.parent / relative
-        if materialized_path.is_file():
+        materialized_path = next(
+            (
+                candidate
+                for candidate in (
+                    solution_path.parent / relative,
+                    solution_path.parent / "sources" / relative,
+                )
+                if candidate.is_file()
+            ),
+            None,
+        )
+        if materialized_path is not None:
             materialized_entries.append(
                 {
                     "path": relative_path,
@@ -1387,6 +1398,11 @@ def validate_operator_artifact(
     task_root = Path(task_dir).expanduser().resolve()
     candidate_manifest = build_candidate_manifest(solution_path)
     errors = list(candidate_manifest["errors"])
+    loaded_solution, _ = _load_solution(solution_path) if solution_path.is_file() else (None, [])
+    if isinstance(loaded_solution, dict) and any(
+        field in loaded_solution for field in ("spec", "operator", "solution_type")
+    ):
+        errors.extend(solution_payload_errors(loaded_solution))
     source_dir = solution_path.parent / "sources"
     artifact_complete = solution_path.is_file() and solution_path.stat().st_size > 0
     if source_dir.exists() and not source_dir.is_dir():

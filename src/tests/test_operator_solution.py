@@ -36,16 +36,42 @@ def test_pack_reads_real_sources_and_preserves_metadata(tmp_path: Path) -> None:
     assert result["source_count"] == 1
     packed = json.loads(solution.read_text(encoding="utf-8"))
     assert packed["name"] == "candidate"
-    assert packed["entry_point"] == "sources/adapter.py::run"
+    assert packed["definition"]
+    assert packed["spec"]["entry_point"] == "adapter.py::run"
+    assert packed["spec"]["languages"] == ["python"]
     assert packed["sources"] == [{
-        "path": "sources/adapter.py", "language": "python",
+        "path": "adapter.py", "language": "python",
         "content": "def run(value):\n    return value\n",
     }]
     assert result["solution_sha256"] == hashlib.sha256(solution.read_bytes()).hexdigest()
-    assert result["source_sha256"]["sources/adapter.py"] == hashlib.sha256(
+    assert result["source_sha256"]["adapter.py"] == hashlib.sha256(
         (tmp_path / "sources" / "adapter.py").read_bytes()
     ).hexdigest()
     assert "content" not in json.loads((tmp_path / "solution_spec.json").read_text())["sources"][0]
+
+
+def test_pack_normalizes_flat_phase3_descriptor(tmp_path: Path) -> None:
+    (tmp_path / "sources").mkdir()
+    (tmp_path / "sources" / "adapter.py").write_text("def run(value):\n    return value\n", encoding="utf-8")
+    (tmp_path / "solution_spec.json").write_text(json.dumps({
+        "operator": "Cat",
+        "solution_type": "ascendc",
+        "entry_point": "sources/adapter.py::run",
+        "target_hardware": ["ascend910b"],
+        "build_method": "cmake",
+        "sources": [{"path": "sources/adapter.py"}],
+    }), encoding="utf-8")
+
+    result = pack_operator_solution(tmp_path / "solution.json", tmp_path)
+
+    assert result["packed"] is True
+    packed = json.loads((tmp_path / "solution.json").read_text())
+    assert packed["name"] == "cat_ascendc"
+    assert packed["definition"] == "Cat"
+    assert packed["author"] == "seam-agent"
+    assert packed["spec"]["entry_point"] == "adapter.py::run"
+    assert packed["spec"]["languages"] == ["ascendc"]
+    assert "operator" not in packed
 
 
 def test_repaired_source_is_repacked_without_model_writeback(tmp_path: Path) -> None:

@@ -344,6 +344,24 @@ def test_diagnostic_artifact_context_prioritizes_timeout_profiles_and_stays_vali
     assert "case-001_sol" not in json.dumps(target_profiles)
 
 
+def test_operator_artifact_validation_rejects_flat_descriptor(tmp_path: Path) -> None:
+    task_dir = tmp_path / "task"
+    task_dir.mkdir()
+    solution = task_dir / "solution.json"
+    solution.write_text(json.dumps({
+        "operator": "Cat",
+        "solution_type": "ascendc",
+        "entry_point": "adapter.py::run",
+        "sources": [{"path": "adapter.py", "content": "def run(value):\n    return value\n"}],
+    }), encoding="utf-8")
+
+    result = validate_operator_artifact(solution, task_dir)
+
+    assert result["candidate_evaluable"] is False
+    assert result["solution_ready"] is False
+    assert any("requires non-empty name" in error for error in result["errors"])
+
+
 def test_operator_artifact_validation_detects_materialized_source_mismatch(tmp_path: Path) -> None:
     task_dir = tmp_path / "task"
     task_dir.mkdir()
