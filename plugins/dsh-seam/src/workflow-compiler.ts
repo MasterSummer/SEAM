@@ -49,6 +49,7 @@ export async function generateWorkflow(definition: Workflow, containerBackend = 
       emit("if (!Number.isSafeInteger(maximum) || maximum < 1 || !Number.isSafeInteger(threshold) || threshold < 1) throw new Error('Invalid loop limits');")
       emit('for (let iteration = 1; iteration <= maximum; iteration++) {')
       emit('current.loop_state.iteration = iteration; current.step_outputs = {};')
+      emit('delete current.loop_state.analyze_operator_failure; delete current.loop_state.error_analysis;')
       emit("let selected; let iterationStatus = 'success';")
       emit('round: {')
       const targets = new Set(definition.phases.filter(item => item.type === 'dispatch').flatMap(item => Object.values(routes(item))))
