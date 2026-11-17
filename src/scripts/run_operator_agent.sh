@@ -150,20 +150,16 @@ Rules:
 2. Write a valid KernelBench solution.json plus main.py / op_host / op_kernel. Use the native Cat example only as a packaging reference:
    /opt/data/npu_kernelbench_runs/llm-cat/workspace
 3. No torch.cat/reference bypass, no CPU fallback, no fake success. Follow docs/operator_constraints.example.json.
-4. Build when it reduces uncertainty. Write the smallest compilable candidate first;
-   use the compiler as an API oracle. Do not force a full design before the first
-   build, but do not build random stubs either. Once the first solution.json
-   exists, build and smoke it before starting another broad SDK review.
+4. Evaluation: once the first solution.json exists, build it and run smoke.
    Smoke is diagnostic and may be run any number of times. Full is authoritative;
    run it as soon as smoke passes, and always by 90% of the budget.
-5. Research discipline (read-streak rule):
+5. Research discipline:
    - Before any read/search/sed/cat of SDK headers, add one line to research.md:
      `Question: ... | Decision this will change: ... | Target: ...`.
-   - If you cannot name a decision that this read will change, do not read.
-   - Count consecutive research-only tool calls (read/grep/glob/sed/cat/find).
-     After 3 consecutive research calls, stop and take an executable action:
-     write/edit, build, or run kernel_eval.py smoke.
-   - Do not do a global "read the whole SDK first" pass. Read only what the
+   - If you cannot name a decision that this read will change, prefer not to read.
+   - If you notice 3+ consecutive research-only tool calls (read/grep/glob/sed/cat/find),
+     treat that as a hint that it may be time to write/build/smoke; use judgment.
+   - Avoid a global "read the whole SDK first" pass. Prefer reading what the
      compiler or a failing trace points at.
 6. Subagent design:
    - Use the `subagent` tool for narrow read-only questions, one at a time:
