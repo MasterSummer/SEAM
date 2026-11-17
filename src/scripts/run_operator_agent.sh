@@ -133,11 +133,20 @@ Tools:
     --feedback $WORKSPACE/feedback.jsonl --kernelbench-root $KB_ROOT
 
 Rules:
+0. Preflight first: run `ls -l /dev/davinci$DEVICE` and a tiny
+   `python -c "import torch,torch_npu; print(torch.npu.is_available(), torch.npu.device_count())"`.
+   If the device is not visible, stop and report an environment blocker immediately;
+   do not spend the budget building a candidate that cannot be evaluated.
 1. Read definition.json, workload.jsonl and reference first.
 2. Write a valid KernelBench solution.json plus main.py / op_host / op_kernel. Use the native Cat example only as a packaging reference:
    /opt/data/npu_kernelbench_runs/llm-cat/workspace
 3. No torch.cat/reference bypass, no CPU fallback, no fake success. Follow docs/operator_constraints.example.json.
-4. Build first, then smoke. Smoke is diagnostic and may be run any number of times. Full is authoritative; run it only after a smoke passes or when you are near the deadline.
+4. Build first, then smoke. Smoke is diagnostic and may be run any number of times.
+   After writing the first solution.json, build and smoke within 10 minutes.
+   Do not spend more than 3 consecutive tool calls reading SDK headers; if a
+   declaration is still unclear, build and let the compiler answer.
+   Full is authoritative; run it as soon as smoke passes, and always by 90% of
+   the budget.
 5. Read the feedback JSON and the referenced traces/logs. Do not guess from a summary alone.
 6. Keep notes.md and experiments.md current. Snapshot promising candidates under candidates/.
 7. You may use subagent for read-only independent probes (API research, shape analysis, failure reproduction). Do not let parallel subagents edit the same source files.
@@ -159,8 +168,10 @@ set +e
   cd "$WORKSPACE"
   export TMPDIR="$OUT/tmp" SEAM_AGENT_TMPDIR="$OUT/tmp"
   export ASCEND_RT_VISIBLE_DEVICES="$DEVICE"
+  # bwrap's fresh /dev hides davinci nodes; this profile is trusted and needs NPU access.
+  export DSH_PERMISSION_MODE="${SEAM_DSH_PERMISSION_MODE:-danger-full-access}"
   export NO_PROXY='127.0.0.1,localhost,::1' no_proxy='127.0.0.1,localhost,::1'
-  timeout --signal=TERM --kill-after=60s "$TASK_BUDGET" \
+  timeout --signal=TERM --kill-after=120s "$TASK_BUDGET" \
     dsh --profile "$PROFILE" --patch "$PATCH" "$(cat "$PROMPT")"
 ) > "$OUT/agent.log" 2>&1
 RC=$?

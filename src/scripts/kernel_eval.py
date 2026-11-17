@@ -12,6 +12,7 @@ import datetime as dt
 import hashlib
 import json
 import os
+import signal
 import subprocess
 import sys
 import time
@@ -82,10 +83,19 @@ def summarize_traces(traces: Path) -> tuple[Counter, list[dict], dict]:
 
 def attribution(stdout: str, stderr: str, traces: Path) -> str:
     evidence = (stdout + "\n" + stderr).lower()
-    if "fault kernel_name=" in evidence or "aicore exception" in evidence or "device fault" in evidence:
+    if any(marker in evidence for marker in (
+        "fault kernel_name=", "aicore exception", "device fault", "kernel execute failed",
+    )):
         return "candidate"
-    if "reference run() failed" in evidence or "build_baseline" in evidence and "error" in evidence:
+    if any(marker in evidence for marker in (
+        "reference run() failed", "build_baseline", "gen_inputs", "aclnninplaceuniform",
+    )) and ("error" in evidence or "runtimeerror" in evidence or "failed" in evidence):
         return "reference"
+    if any(marker in evidence for marker in (
+        "get device count of npu failed", "invalid device id", "dcmi module initialize failed",
+        "drvret", "get platform info failed", "device_count", "no npu",
+    )):
+        return "environment"
     if "no such file" in evidence or "permission denied" in evidence:
         return "environment"
     if not traces.is_file():
@@ -100,11 +110,12 @@ def main() -> int:
     parser.add_argument("--solution", default="")
     parser.add_argument("--device", default="0")
     parser.add_argument("--limit", type=int, default=2)
-    parser.add_argument("--timeout", type=int, default=900)
+    parser.add_argument("--timeout", type=int, default=0)
     parser.add_argument("--kernelbench-root", default="/home/yiding/npu-kernelbench")
     parser.add_argument("--output-dir", default="")
     parser.add_argument("--feedback", default="")
     args = parser.parse_args()
+    args.timeout = args.timeout or (1800 if args.mode == "full" else 900)
 
     task = Path(args.task).expanduser().resolve()
     solution = Path(args.solution).expanduser().resolve() if args.solution else task / "solution.json"
@@ -181,15 +192,27 @@ def main() -> int:
 
     try:
         with stdout_path.open("w", encoding="utf-8") as stdout, stderr_path.open("w", encoding="utf-8") as stderr:
-            proc = subprocess.run(
+            proc = subprocess.Popen(
                 command, cwd=str(root), env=env, stdout=stdout, stderr=stderr,
-                timeout=args.timeout + 60,
+                start_new_session=True,
             )
-        envelope["exit_code"] = proc.returncode
-        envelope["status"] = "completed" if proc.returncode == 0 else "failure"
-    except subprocess.TimeoutExpired:
-        envelope["exit_code"] = 124
-        envelope["status"] = "timeout"
+            try:
+                rc = proc.wait(timeout=args.timeout + 60)
+                envelope["exit_code"] = rc
+                envelope["status"] = "completed" if rc == 0 else "failure"
+            except subprocess.TimeoutExpired:
+                os.killpg(os.getpgid(proc.pid), signal.SIGTERM)
+                try:
+                    proc.wait(timeout=15)
+                except subprocess.TimeoutExpired:
+                    os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
+                    proc.wait(timeout=10)
+                envelope["exit_code"] = 124
+                envelope["status"] = "timeout"
+
+    except Exception as exc:
+        envelope["status"] = "failure"
+        envelope["summary"] = f"evaluator launch failed: {exc}"
 
     envelope["duration_s"] = round(time.time() - started, 1)
     stdout_text = stdout_path.read_text(encoding="utf-8", errors="replace") if stdout_path.is_file() else ""
@@ -219,10 +242,17 @@ def main() -> int:
         "max_abs": errors["max_abs"],
         "max_rel": errors["max_rel"],
     }
+    attribution_value = attribution(stdout_text, stderr_text, traces)
     envelope.update({
         "metrics": metrics,
         "failures": failures,
-        "attribution": attribution(stdout_text, stderr_text, traces),
+        "attribution": attribution_value,
+        "failure_category": {
+            "reference": "invalid_reference",
+            "environment": "environment",
+            "harness": "harness",
+            "candidate": "candidate",
+        }.get(attribution_value, "candidate"),
     })
     if args.mode == "smoke":
         envelope["summary"] = f"smoke {passed}/{total} passed" + (" (complete)" if complete else " (partial)")
