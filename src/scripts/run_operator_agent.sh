@@ -66,8 +66,17 @@ WORKSPACE="$OUT/workspace"
 rm -rf "$WORKSPACE"
 cp -a "$TASK_DIR" "$WORKSPACE"
 rm -f "$WORKSPACE/solution.json"
-mkdir -p "$WORKSPACE/candidates" "$WORKSPACE/evaluations" "$OUT/tmp"
+mkdir -p "$WORKSPACE/candidates" "$WORKSPACE/evaluations" "$WORKSPACE/subagents" "$OUT/tmp"
 touch "$WORKSPACE/notes.md" "$WORKSPACE/experiments.md"
+cat > "$WORKSPACE/research.md" <<'EOF'
+# Research log
+
+Only record a read here when it changes a concrete decision.
+
+| Question | Decision this read changes | Target path/symbol | Result | Still open? |
+|---|---|---|---|---|
+EOF
+
 
 if [[ "$ENSURE_KEY" == "1" && -z "${!API_KEY_ENV:-}" ]]; then
   export "$API_KEY_ENV=$(python3 -c "import json;print(json.load(open('/root/.local/share/opencode/auth.json'))['deepseek']['key'])")"
@@ -141,17 +150,36 @@ Rules:
 2. Write a valid KernelBench solution.json plus main.py / op_host / op_kernel. Use the native Cat example only as a packaging reference:
    /opt/data/npu_kernelbench_runs/llm-cat/workspace
 3. No torch.cat/reference bypass, no CPU fallback, no fake success. Follow docs/operator_constraints.example.json.
-4. Build first, then smoke. Smoke is diagnostic and may be run any number of times.
-   After writing the first solution.json, build and smoke within 10 minutes.
-   Do not spend more than 3 consecutive tool calls reading SDK headers; if a
-   declaration is still unclear, build and let the compiler answer.
-   Full is authoritative; run it as soon as smoke passes, and always by 90% of
-   the budget.
-5. Read the feedback JSON and the referenced traces/logs. Do not guess from a summary alone.
-6. Keep notes.md and experiments.md current. Snapshot promising candidates under candidates/.
-7. You may use subagent for read-only independent probes (API research, shape analysis, failure reproduction). Do not let parallel subagents edit the same source files.
-8. At 50% of the budget you should have a buildable candidate. At 75% you should have a smoke pass. At 90% run full or preserve the best candidate. At the deadline, stop exploring and report the best candidate and exact pass counts.
-9. Do not modify definition.json or workload.jsonl.
+4. Build when it reduces uncertainty. Write the smallest compilable candidate first;
+   use the compiler as an API oracle. Do not force a full design before the first
+   build, but do not build random stubs either. Once the first solution.json
+   exists, build and smoke it before starting another broad SDK review.
+   Smoke is diagnostic and may be run any number of times. Full is authoritative;
+   run it as soon as smoke passes, and always by 90% of the budget.
+5. Research discipline (read-streak rule):
+   - Before any read/search/sed/cat of SDK headers, add one line to research.md:
+     `Question: ... | Decision this will change: ... | Target: ...`.
+   - If you cannot name a decision that this read will change, do not read.
+   - Count consecutive research-only tool calls (read/grep/glob/sed/cat/find).
+     After 3 consecutive research calls, stop and take an executable action:
+     write/edit, build, or run kernel_eval.py smoke.
+   - Do not do a global "read the whole SDK first" pass. Read only what the
+     compiler or a failing trace points at.
+6. Subagent design:
+   - Use the `subagent` tool for narrow read-only questions, one at a time:
+     API declaration lookup, shape/dtype audit, independent review, or failure
+     reproduction.
+   - Give the subagent one precise question and the exact paths to inspect.
+     Require it to return <=10 lines: answer, evidence paths/symbols, confidence,
+     and what decision it changes. No full logs, no source edits.
+   - Save each report under subagents/ and cite it in research.md. The parent
+     agent owns all source edits; do not let parallel subagents edit the same files.
+   - Use a subagent when a question would otherwise require many header reads;
+     do not use it to avoid building or smoke-testing.
+7. Read the feedback JSON and the referenced traces/logs. Do not guess from a summary alone.
+8. Keep notes.md, experiments.md and research.md current. Snapshot promising candidates under candidates/.
+9. At 50% of the budget you should have a buildable candidate. At 75% you should have a smoke pass. At 90% run full or preserve the best candidate. At the deadline, stop exploring and report the best candidate and exact pass counts.
+10. Do not modify definition.json or workload.jsonl.
 
 Start now. Work autonomously until the task is solved or the deadline is reached. Do not ask questions.
 EOF
