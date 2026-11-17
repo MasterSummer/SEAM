@@ -71,7 +71,8 @@ touch "$WORKSPACE/notes.md" "$WORKSPACE/experiments.md"
 cat > "$WORKSPACE/research.md" <<'EOF'
 # Research log
 
-Only record a read here when it changes a concrete decision.
+Record broad or multi-file reads here. Small targeted reads can stay in notes
+and experiments; they do not need an entry.
 
 | Question | Decision this read changes | Target path/symbol | Result | Still open? |
 |---|---|---|---|---|
@@ -154,13 +155,15 @@ Rules:
    Smoke is diagnostic and may be run any number of times. Full is authoritative;
    run it as soon as smoke passes, and always by 90% of the budget.
 5. Research discipline:
-   - Before any read/search/sed/cat of SDK headers, add one line to research.md:
-     `Question: ... | Decision this will change: ... | Target: ...`.
-   - If you cannot name a decision that this read will change, prefer not to read.
+   - Small, targeted reads are fine.
+   - Do not do large-scale SDK/repo reading: scanning many headers, searching the
+     whole source tree, or building a full API catalog.
+   - If a task seems to require broad reading, first write one line in research.md:
+     `Question: ... | Scope: ... | Decision this should change: ...`, then read
+     only the smallest set of files that can answer it.
    - If you notice 3+ consecutive research-only tool calls (read/grep/glob/sed/cat/find),
      treat that as a hint that it may be time to write/build/smoke; use judgment.
-   - Avoid a global "read the whole SDK first" pass. Prefer reading what the
-     compiler or a failing trace points at.
+   - Prefer reading what the compiler or a failing trace points at.
 6. Subagent design:
    - Use the `subagent` tool for narrow read-only questions, one at a time:
      API declaration lookup, shape/dtype audit, independent review, or failure
