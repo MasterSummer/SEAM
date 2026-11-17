@@ -139,7 +139,7 @@ Tools:
     --feedback $WORKSPACE/feedback.jsonl --kernelbench-root $KB_ROOT
   python $REPO_ROOT/src/scripts/kernel_eval.py full \\
     --task $WORKSPACE --solution $WORKSPACE/solution.json \\
-    --device $DEVICE --output-dir $WORKSPACE/evaluations \\
+    --device $DEVICE --timeout 2400 --output-dir $WORKSPACE/evaluations \\
     --feedback $WORKSPACE/feedback.jsonl --kernelbench-root $KB_ROOT
 
 Rules:
