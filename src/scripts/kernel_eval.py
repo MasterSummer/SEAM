@@ -170,6 +170,7 @@ def main() -> int:
         "--solution", str(solution),
         "--runner", "persistent",
         "--timeout", str(workload_timeout),
+        "--compile-timeout", "600",
         "-o", str(traces),
         "--verbose",
         "--work-dir", str(work),
