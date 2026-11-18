@@ -230,6 +230,8 @@ def update_best(task: Path, solution: Path, envelope: dict) -> None:
     previous = load_best(task)
     rate = float(metrics.get("workload_pass_rate") or 0)
     passed = int(metrics.get("passed_workloads") or 0)
+    if not previous and passed <= 0 and not metrics.get("operator_passed"):
+        return
     previous_rate = float(previous.get("workload_pass_rate") or 0)
     previous_passed = int(previous.get("passed_workloads") or 0)
     if previous and not (rate > previous_rate or (rate == previous_rate and passed > previous_passed)):
