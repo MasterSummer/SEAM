@@ -15,7 +15,8 @@ Options:
   --model NAME
   --base-url URL
   --api-key-env NAME
-  --task-budget SECONDS      Task-level deadline (default 7200)
+  --task-budget SECONDS      Agent work deadline (default 7200)
+  --full-timeout SECONDS     Authoritative post-agent full eval timeout (default 2400)
   --profile NAME             dsh profile (default headless)
   --ensure-key               Export a key from /root/.local/share/opencode/auth.json
   -h, --help
@@ -31,6 +32,7 @@ MODEL="${SEAM_MODEL:-deepseek-v4-flash-0731}"
 BASE_URL="${SEAM_BASE_URL:-https://apicz.boyuerichdata.com/v1}"
 API_KEY_ENV="${SEAM_API_KEY_ENV:-CHUANGZHI_KEY}"
 TASK_BUDGET="${SEAM_TASK_BUDGET:-7200}"
+FULL_TIMEOUT="${SEAM_FULL_TIMEOUT:-2400}"
 PROFILE="${SEAM_DSH_PROFILE:-headless}"
 ENSURE_KEY=0
 
@@ -45,6 +47,7 @@ while [[ $# -gt 0 ]]; do
     --base-url) BASE_URL="$2"; shift 2 ;;
     --api-key-env) API_KEY_ENV="$2"; shift 2 ;;
     --task-budget) TASK_BUDGET="$2"; shift 2 ;;
+    --full-timeout) FULL_TIMEOUT="$2"; shift 2 ;;
     --profile) PROFILE="$2"; shift 2 ;;
     --ensure-key) ENSURE_KEY=1; shift ;;
     -h|--help) usage; exit 0 ;;
@@ -204,8 +207,30 @@ set +e
 RC=$?
 set -e
 DUR=$(( $(date +%s) - START ))
+
+# The agent gets its work deadline; full is a separate authoritative evaluation
+# that always runs afterwards (hard requirement), with its own timeout.
+FULL_RC=2
+FULL_DUR=0
+if [[ -f "$WORKSPACE/solution.json" ]]; then
+  echo "final authoritative full eval (timeout ${FULL_TIMEOUT}s)..." >> "$OUT/agent.log"
+  FULL_START=$(date +%s)
+  set +e
+  python3 "$REPO_ROOT/src/scripts/kernel_eval.py" full \
+    --task "$WORKSPACE" --solution "$WORKSPACE/solution.json" \
+    --device "$DEVICE" --timeout "$FULL_TIMEOUT" \
+    --output-dir "$WORKSPACE/evaluations" \
+    --feedback "$WORKSPACE/final-feedback.jsonl" \
+    --kernelbench-root "$KB_ROOT" >> "$OUT/agent.log" 2>&1
+  FULL_RC=$?
+  set -e
+  FULL_DUR=$(( $(date +%s) - FULL_START ))
+else
+  echo "final full skipped: solution.json missing" >> "$OUT/agent.log"
+fi
+
 cat > "$OUT/run.json" <<JSON
-{"run_id":"$RUN_ID","task":"$TASK_NAME","status":"$([[ $RC -eq 0 ]] && echo completed || echo failed)","exit_code":$RC,"duration_s":$DUR,"workspace":"$WORKSPACE"}
+{"run_id":"$RUN_ID","task":"$TASK_NAME","agent_exit":$RC,"agent_duration_s":$DUR,"full_exit":$FULL_RC,"full_duration_s":$FULL_DUR,"workspace":"$WORKSPACE"}
 JSON
-echo "agent exit=$RC duration=${DUR}s log=$OUT/agent.log"
+echo "agent exit=$RC duration=${DUR}s full_exit=$FULL_RC full_duration=${FULL_DUR}s log=$OUT/agent.log"
 exit "$RC"
