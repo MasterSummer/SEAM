@@ -179,8 +179,8 @@ Tools:
   python $REPO_ROOT/src/scripts/selftest_eval.py --task $WORKSPACE --feedback $WORKSPACE/feedback.jsonl
 
 Rules:
-0. Preflight first: run `ls -l /dev/davinci$DEVICE` and a tiny
-   `python -c "import torch,torch_npu; print(torch.npu.is_available(), torch.npu.device_count())"`.
+0. Preflight first: run 'ls -l /dev/davinci$DEVICE' and a tiny
+   'python -c "import torch,torch_npu; print(torch.npu.is_available(), torch.npu.device_count())"'.
    If the device is not visible, stop and report an environment blocker immediately;
    do not spend the budget building a candidate that cannot be evaluated.
 1. Read definition.json, workload.jsonl and reference first.
@@ -204,13 +204,13 @@ Rules:
    - Do not do large-scale SDK/repo reading: scanning many headers, searching the
      whole source tree, or building a full API catalog.
    - If a task seems to require broad reading, first write one line in research.md:
-     `Question: ... | Scope: ... | Decision this should change: ...`, then read
+     'Question: ... | Scope: ... | Decision this should change: ...', then read
      only the smallest set of files that can answer it.
    - If you notice 3+ consecutive research-only tool calls (read/grep/glob/sed/cat/find),
      treat that as a hint that it may be time to write/build/smoke; use judgment.
    - Prefer reading what the compiler or a failing trace points at.
 7. Subagent design:
-   - Use the `subagent` tool for narrow read-only questions, one at a time:
+   - Use the 'subagent' tool for narrow read-only questions, one at a time:
      API declaration lookup, shape/dtype audit, independent review, or failure
      reproduction.
    - Give the subagent one precise question and the exact paths to inspect.
