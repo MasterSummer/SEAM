@@ -114,6 +114,8 @@ To change a frozen test, submit a request, then have a reviewer approve it:
 Never weaken tolerance, delete a failing case, or change expected to candidate output.
 EOF
 
+python3 "$REPO_ROOT/src/scripts/make_task_card.py" \
+  --task "$TASK_DIR" --output "$WORKSPACE/task_card" >> "$OUT/agent.log" 2>&1
 
 if [[ "$ENSURE_KEY" == "1" && -z "${!API_KEY_ENV:-}" ]]; then
   export "$API_KEY_ENV=$(python3 -c "import json;print(json.load(open('/root/.local/share/opencode/auth.json'))['deepseek']['key'])")"
@@ -189,7 +191,10 @@ Rules:
    'python -c "import torch,torch_npu; print(torch.npu.is_available(), torch.npu.device_count())"'.
    If the device is not visible, stop and report an environment blocker immediately;
    do not spend the budget building a candidate that cannot be evaluated.
-1. Read definition.json, workload.jsonl and reference first.
+1. Read task_card/api_desc.md, task_card/cases.csv and task_card/shape_matrix.csv first.
+   These are the explicit semantics + shape/dtype/attr matrix. Then read definition.json,
+   workload.jsonl and reference. Use case_id/uuid when selecting local tests; do not
+   assume the first few cases cover the matrix.
 2. Write a valid KernelBench solution.json plus main.py / op_host / op_kernel. Use the native Cat example only as a packaging reference:
    /opt/data/npu_kernelbench_runs/llm-cat/workspace
 3. No torch.cat/reference bypass, no CPU fallback, no fake success. Follow docs/operator_constraints.example.json.
@@ -198,6 +203,8 @@ Rules:
        fast_iter.py bootstrap --task <workspace>
        fast_iter.py build --task <workspace>
        fast_iter.py run --task <workspace> --limit 4 --device <card> --feedback <workspace>/feedback.jsonl
+   - When a case is in 'shape_matrix.csv' but not covered by the first 4, select it
+     explicitly with '--workloads <uuid>' (especially tail/empty/largest/non-last).
    - Official smoke is optional. Use at most one '--limit 1' run when fast_iter
      has no staged build tree, or when you need an integration check. Do not use
      official smoke as the repeated iteration loop.
