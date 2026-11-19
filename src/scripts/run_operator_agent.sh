@@ -15,7 +15,7 @@ Options:
   --model NAME
   --base-url URL
   --api-key-env NAME
-  --task-budget SECONDS      Agent work deadline (default 7200)
+  --task-budget SECONDS      Agent work deadline (default 10800)
   --full-timeout SECONDS     Authoritative post-agent full eval timeout (default 2400)
   --profile NAME             dsh profile (default headless)
   --ensure-key               Export a key from /root/.local/share/opencode/auth.json
@@ -31,7 +31,7 @@ PROVIDER="${SEAM_PROVIDER:-chuangzhi}"
 MODEL="${SEAM_MODEL:-deepseek-v4-flash-0731}"
 BASE_URL="${SEAM_BASE_URL:-https://apicz.boyuerichdata.com/v1}"
 API_KEY_ENV="${SEAM_API_KEY_ENV:-CHUANGZHI_KEY}"
-TASK_BUDGET="${SEAM_TASK_BUDGET:-7200}"
+TASK_BUDGET="${SEAM_TASK_BUDGET:-10800}"
 FULL_TIMEOUT="${SEAM_FULL_TIMEOUT:-2400}"
 PROFILE="${SEAM_DSH_PROFILE:-headless}"
 ENSURE_KEY=0
@@ -94,7 +94,8 @@ Files:
   cases.json       structured cases
   run_selftest.py  test runner
 
-run_selftest.py must write a JSON object to $SELFTEST_JSON_OUT:
+run_selftest.py may be a plain Python test: exit 0 on success, non-zero on failure.
+If you also write JSON to $SELFTEST_JSON_OUT, selftest_eval can report cases/coverage:
   {"status":"passed|failed",
    "metrics":{"total":8,"passed":7},
    "cases":[{"id":"case-001","status":"PASSED|INCORRECT|RUNTIME_ERROR",...}],
@@ -258,6 +259,35 @@ set +e
 ) > "$OUT/agent.log" 2>&1
 RC=$?
 set -e
+ATTEMPTS=1
+# Headless dsh exits 0 when the model ends a turn without a tool call.  If that
+# happened before solution.json existed, continue in the same workspace once
+# instead of treating a transient empty turn as a completed task.
+if [[ "$RC" -eq 0 && ! -f "$WORKSPACE/solution.json" ]]; then
+  REMAIN=$(( DEADLINE - $(date +%s) ))
+  if (( REMAIN > 300 )); then
+    ATTEMPTS=2
+    cat > "$OUT/retry.prompt.txt" <<'RETRY'
+The previous session ended before writing solution.json. Continue the same task
+in this workspace. Read notes.md, experiments.md, research.md and existing files;
+do not restart from scratch. Write solution.json as soon as possible, then build
+and smoke. Do not ask questions; work until the deadline.
+RETRY
+    echo "retry: previous session produced no solution; remaining=${REMAIN}s" >> "$OUT/agent.log"
+    set +e
+    (
+      cd "$WORKSPACE"
+      export TMPDIR="$OUT/tmp" SEAM_AGENT_TMPDIR="$OUT/tmp"
+      export ASCEND_RT_VISIBLE_DEVICES="$DEVICE"
+      export DSH_PERMISSION_MODE="${SEAM_DSH_PERMISSION_MODE:-danger-full-access}"
+      export NO_PROXY='127.0.0.1,localhost,::1' no_proxy='127.0.0.1,localhost,::1'
+      timeout --signal=TERM --kill-after=120s "$REMAIN" \
+        dsh --profile "$PROFILE" --patch "$PATCH" "$(cat "$OUT/retry.prompt.txt")"
+    ) >> "$OUT/agent.log" 2>&1
+    RC=$?
+    set -e
+  fi
+fi
 DUR=$(( $(date +%s) - START ))
 
 # The agent gets its work deadline; full is a separate authoritative evaluation
@@ -284,7 +314,7 @@ else
 fi
 
 cat > "$OUT/run.json" <<JSON
-{"run_id":"$RUN_ID","task":"$TASK_NAME","agent_exit":$RC,"agent_duration_s":$DUR,"full_exit":$FULL_RC,"full_duration_s":$FULL_DUR,"workspace":"$WORKSPACE"}
+{"run_id":"$RUN_ID","task":"$TASK_NAME","agent_attempts":$ATTEMPTS,"agent_exit":$RC,"agent_duration_s":$DUR,"full_exit":$FULL_RC,"full_duration_s":$FULL_DUR,"workspace":"$WORKSPACE"}
 JSON
 echo "agent exit=$RC duration=${DUR}s full_exit=$FULL_RC full_duration=${FULL_DUR}s log=$OUT/agent.log"
 exit "$RC"

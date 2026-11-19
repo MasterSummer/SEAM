@@ -232,6 +232,8 @@ def main() -> int:
     elif rc not in (0, None) and status == "passed":
         envelope["status"] = "failed"
         envelope["summary"] = f"selftest exited {rc} despite reporting passed"
+    elif not cases:
+        envelope["summary"] = f"selftest {'passed' if rc == 0 else 'failed'} (exit {rc}; no JSON cases)"
     return finish()
 
 
