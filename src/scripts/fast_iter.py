@@ -15,6 +15,7 @@ import argparse
 import json
 import os
 import shutil
+import csv
 import subprocess
 import sys
 import time
@@ -171,16 +172,44 @@ def build(task: Path, staged: Path, jobs: int) -> dict:
     }
 
 
-def run(task: Path, staged: Path, limit: int, workloads: str, device: int, timeout: int) -> dict:
+def select_suite(task: Path, all_workloads: list[dict], suite: str, limit: int, workloads: str) -> list[dict]:
+    if workloads:
+        wanted = {item.strip() for item in workloads.split(",") if item.strip()}
+        return [item for item in all_workloads if item.get("uuid") in wanted]
+    if suite == "first":
+        return all_workloads[:max(1, limit)]
+    if suite == "all":
+        return all_workloads[:max(1, limit)] if limit > 0 else all_workloads
+    card = task / "task_card" / "cases.csv"
+    groups: dict[tuple, list[dict]] = {}
+    if card.is_file():
+        with card.open(newline="", encoding="utf-8") as stream:
+            for row in csv.DictReader(stream):
+                key = (row.get("dtypes", ""), row.get("ranks", ""), row.get("tail", ""),
+                       row.get("empty", ""), row.get("non_last", ""))
+                groups.setdefault(key, []).append(row)
+    candidates = []
+    by_uuid = {str(item.get("uuid")): item for item in all_workloads}
+    for rows in groups.values():
+        if suite == "edge":
+            edge_rows = [row for row in rows if row.get("tail") == "1" or row.get("empty") == "1" or row.get("non_last") == "1"]
+            rows = edge_rows or rows
+        pick = max(rows, key=lambda row: int(row.get("max_numel") or 0))
+        item = by_uuid.get(str(pick.get("uuid")))
+        if item is not None:
+            candidates.append((int(pick.get("max_numel") or 0),
+                               int(pick.get("tail") or 0) + int(pick.get("empty") or 0) + int(pick.get("non_last") or 0),
+                               item))
+    candidates.sort(key=lambda entry: (entry[0], entry[1]), reverse=True)
+    return [item for _, _, item in candidates[:max(1, limit)]]
+
+
+def run(task: Path, staged: Path, limit: int, workloads: str, device: int, timeout: int, suite: str = "first") -> dict:
     all_workloads = [
         json.loads(line) for line in (task / "workload.jsonl").read_text(encoding="utf-8").splitlines()
         if line.strip()
     ]
-    if workloads:
-        wanted = {item.strip() for item in workloads.split(",") if item.strip()}
-        selected = [item for item in all_workloads if item.get("uuid") in wanted]
-    else:
-        selected = all_workloads[:max(1, limit)]
+    selected = select_suite(task, all_workloads, suite, limit, workloads)
     if not selected:
         raise SystemExit("no workloads selected")
     fast = sync_eval_dir(task, staged, selected, device)
@@ -248,14 +277,19 @@ def run(task: Path, staged: Path, limit: int, workloads: str, device: int, timeo
                 "status": status,
                 "max_abs": correctness.get("max_absolute_error"),
                 "max_rel": correctness.get("max_relative_error"),
+                "has_nan": correctness.get("has_nan"),
+                "has_inf": correctness.get("has_inf"),
                 "log": (evaluation.get("log") or "")[:300],
             })
     passed = statuses.get("PASSED", 0)
     return {
         "status": "passed" if traces and passed == len(traces) else "failed",
         "duration_s": round(time.time() - started, 1),
+        "suite": suite,
         "tested": len(traces),
         "passed": passed,
+        "tested_uuids": [str(item.get("workload", {}).get("uuid")) for item in traces if item.get("workload")],
+        "missing_uuids": [str(item.get("uuid")) for item in selected if item.get("uuid") not in {str(t.get("workload", {}).get("uuid")) for t in traces}],
         "statuses": statuses,
         "max_abs": max_abs if max_abs else None,
         "max_rel": max_rel if max_rel else None,
@@ -278,6 +312,7 @@ def main() -> int:
         cmd.add_argument("--device", type=int, default=0)
         cmd.add_argument("--timeout", type=int, default=300)
         cmd.add_argument("--feedback", default="")
+        cmd.add_argument("--suite", choices=["first","matrix","edge","all"], default="first")
     args = parser.parse_args()
     task = Path(args.task).expanduser().resolve()
     if args.command == "bootstrap":
@@ -287,7 +322,7 @@ def main() -> int:
     if args.command == "build":
         print(json.dumps(build(task, staged, args.jobs), ensure_ascii=False))
         return 0
-    result = run(task, staged, args.limit, args.workloads, args.device, args.timeout)
+    result = run(task, staged, args.limit, args.workloads, args.device, args.timeout, args.suite)
     (task / "fast_eval" / "result.json").write_text(
         json.dumps(result, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
     )
@@ -300,11 +335,14 @@ def main() -> int:
             "duration_s": result["duration_s"],
             "summary": f"local smoke {result['passed']}/{result['tested']} passed",
             "metrics": {
+                "suite": result.get("suite"),
                 "tested_workloads": result["tested"],
                 "passed_workloads": result["passed"],
                 "statuses": result["statuses"],
                 "max_abs": result["max_abs"],
                 "max_rel": result["max_rel"],
+                "tested_uuids": result.get("tested_uuids", []),
+                "missing_uuids": result.get("missing_uuids", []),
             },
             "failures": result["failures"],
             "artifacts": {"stdout": result["stdout"], "stderr": result["stderr"], "result": str(task / "fast_eval" / "result.json")},

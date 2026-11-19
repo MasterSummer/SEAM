@@ -173,7 +173,7 @@ Tools:
 - local smoke (primary; no official evaluator needed):
   python $REPO_ROOT/src/scripts/fast_iter.py bootstrap --task $WORKSPACE
   python $REPO_ROOT/src/scripts/fast_iter.py build --task $WORKSPACE
-  python $REPO_ROOT/src/scripts/fast_iter.py run --task $WORKSPACE --limit 4 --device $DEVICE --feedback $WORKSPACE/feedback.jsonl
+  python $REPO_ROOT/src/scripts/fast_iter.py run --task $WORKSPACE --suite matrix --limit 8 --device $DEVICE --feedback $WORKSPACE/feedback.jsonl
 - official smoke (optional; only to stage a build tree or for integration):
   python $REPO_ROOT/src/scripts/kernel_eval.py smoke \\
     --task $WORKSPACE --solution $WORKSPACE/solution.json \\
@@ -202,9 +202,10 @@ Rules:
    - Once solution.json exists, build and run tiny/contract cases:
        fast_iter.py bootstrap --task <workspace>
        fast_iter.py build --task <workspace>
-       fast_iter.py run --task <workspace> --limit 4 --device <card> --feedback <workspace>/feedback.jsonl
-   - When a case is in 'shape_matrix.csv' but not covered by the first 4, select it
-     explicitly with '--workloads <uuid>' (especially tail/empty/largest/non-last).
+       fast_iter.py run --task <workspace> --suite matrix --limit 8 --device <card> --feedback <workspace>/feedback.jsonl
+   - '--suite matrix' covers one large representative per shape/dtype group.
+     Use '--suite edge' for tail/empty/non-last, and '--workloads <uuid>' to replay
+     a specific failure.
    - Official smoke is optional. Use at most one '--limit 1' run when fast_iter
      has no staged build tree, or when you need an integration check. Do not use
      official smoke as the repeated iteration loop.

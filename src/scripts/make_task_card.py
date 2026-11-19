@@ -120,15 +120,18 @@ def make_card(task: Path, output: Path) -> dict:
     ]
     (output / "api_desc.md").write_text("\n".join(lines), encoding="utf-8")
 
+    (output / "validation").mkdir(parents=True, exist_ok=True)
+    (output / "cases.jsonl").write_text("", encoding="utf-8")
     case_rows = []
     matrix_groups: dict[tuple, list[str]] = {}
-    (output / "cases.jsonl").write_text("", encoding="utf-8")
+    check_rows = []
     for index, workload in enumerate(workloads):
         info = classify(workload)
         uuid = str(workload.get("uuid") or f"case-{index:03d}")
         shapes = "; ".join(f"{name}:{shape}" for name, shape, _ in info["shapes"])
         dtypes = ",".join(info["dtypes"])
         attrs_text = json.dumps(info["attrs"], ensure_ascii=False, sort_keys=True)
+        tolerance = workload.get("tolerance") or {}
         case_rows.append({
             "case_id": index,
             "uuid": uuid,
@@ -140,7 +143,12 @@ def make_card(task: Path, output: Path) -> dict:
             "empty": int(info["empty"]),
             "non_last": int(info["non_last"]),
             "max_numel": info["max_numel"],
+            "atol": tolerance.get("max_atol"),
+            "rtol": tolerance.get("max_rtol"),
+            "required_ratio": tolerance.get("required_matched_ratio"),
+            "max_error_cap": tolerance.get("max_error_cap"),
         })
+        check_rows.append({"case_id": index, "uuid": uuid, "tolerance": tolerance})
         key = (dtypes, tuple(info["ranks"]), info["tail"], info["empty"], info["non_last"])
         matrix_groups.setdefault(key, []).append(uuid)
         with (output / "cases.jsonl").open("a", encoding="utf-8") as stream:
@@ -151,6 +159,17 @@ def make_card(task: Path, output: Path) -> dict:
         writer.writeheader()
         writer.writerows(case_rows)
 
+    (output / "validation" / "cases.csv").write_text(
+        (output / "cases.csv").read_text(encoding="utf-8"), encoding="utf-8")
+    (output / "validation" / "cases.jsonl").write_text(
+        (output / "cases.jsonl").read_text(encoding="utf-8"), encoding="utf-8")
+    (output / "validation" / "checks.json").write_text(
+        json.dumps({"cases": check_rows}, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    (output / "validation" / "README.md").write_text(
+        "# Validation contract\n\n"
+        "`cases.csv` is the shape/dtype/attr/tolerance matrix; `checks.json` keeps the\n"
+        "per-case tolerance. Task-specific custom checks belong here, not in a global evaluator.\n",
+        encoding="utf-8")
     with (output / "shape_matrix.csv").open("w", newline="", encoding="utf-8") as stream:
         writer = csv.writer(stream)
         writer.writerow(["dtypes", "ranks", "tail", "empty", "non_last", "cases", "count"])
