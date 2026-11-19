@@ -13,6 +13,11 @@ import json
 from pathlib import Path
 from typing import Any
 
+GE_DTYPE = {
+    "float32": "ge::DT_FLOAT", "float16": "ge::DT_FLOAT16", "bfloat16": "ge::DT_BF16",
+    "int64": "ge::DT_INT64", "int32": "ge::DT_INT32", "int16": "ge::DT_INT16",
+    "int8": "ge::DT_INT8", "uint8": "ge::DT_UINT8", "bool": "ge::DT_BOOL",
+}
 SIZE_BYTES = {
     "float64": 8, "float32": 4, "float16": 2, "bfloat16": 2,
     "int64": 8, "int32": 4, "int16": 2, "int8": 1,
@@ -177,10 +182,84 @@ def make_card(task: Path, output: Path) -> dict:
             writer.writerow([dtypes, ",".join(map(str, ranks)), int(tail), int(empty), int(non_last),
                              ";".join(uuids), len(uuids)])
 
+    # Engineering skeletons only: no algorithm, no answer.
+    op_name = name
+    input_names = list(inputs)
+    output_names = list(outputs)
+    scalar_names = set()
+    if workloads:
+        for name in input_names:
+            specs = [(workload.get("inputs") or {}).get(name) or {} for workload in workloads]
+            if specs and all(spec.get("type") == "scalar" for spec in specs):
+                scalar_names.add(name)
+    tensor_inputs = [name for name in input_names if name not in scalar_names]
+    all_dtypes = []
+    for workload in workloads:
+        for name in tensor_inputs:
+            spec = (workload.get("inputs") or {}).get(name) or {}
+            dtype = spec.get("dtype")
+            if dtype and dtype not in all_dtypes:
+                all_dtypes.append(dtype)
+    ge_dtypes = [GE_DTYPE.get(dtype, "ge::DT_FLOAT16") for dtype in all_dtypes] or ["ge::DT_FLOAT16"]
+    class_name = op_name[:1].upper() + op_name[1:]
+    host = [
+        '#include "register/op_def_registry.h"',
+        '#include "tiling/platform/platform_ascendc.h"',
+        '',
+        '// SKELETON: fill tiling data and launch parameters; no algorithm here.',
+        'namespace optiling {',
+        'static ge::graphStatus TilingFunc(gert::TilingContext *context) {',
+        '    context->SetBlockDim(platform_ascendc::PlatformAscendCManager::GetInstance()->GetCoreNumAiv());',
+        '    return ge::GRAPH_SUCCESS;',
+        '}',
+        '}  // namespace optiling',
+        '',
+        'namespace ops {',
+        f'class {class_name} : public OpDef {{',
+        'public:',
+        f'    explicit {class_name}(const char *name) : OpDef(name) {{',
+    ]
+    for input_name in tensor_inputs:
+        host += [f'        this->Input("{input_name}")',
+                 '            .ParamType(REQUIRED)',
+                 f'            .DataType({{{", ".join(ge_dtypes)}}})',
+                 '            .Format({ge::FORMAT_ND});']
+    for output_name in output_names:
+        host += [f'        this->Output("{output_name}")',
+                 '            .ParamType(REQUIRED)',
+                 f'            .DataType({{{", ".join(ge_dtypes)}}})',
+                 '            .Format({ge::FORMAT_ND});']
+    for scalar_name in sorted(scalar_names):
+        host += [f'        this->Attr("{scalar_name}").AttrType(OPTIONAL).Int(0);']
+    host += [
+        '        this->AICore().SetTiling(optiling::TilingFunc).AddConfig("ascend910b");',
+        '    }',
+        '};',
+        f'OP_ADD({class_name});',
+        '}  // namespace ops',
+        '',
+    ]
+    host_path = output / "question" / "op_host" / f"{op_name.lower()}.cpp"
+    host_path.write_text("\n".join(host), encoding="utf-8")
+    kernel_args = ", ".join([f"GM_ADDR {item}" for item in tensor_inputs] + [f"GM_ADDR {item}" for item in output_names])
+    kernel = [
+        '#include "kernel_operator.h"',
+        '',
+        '// SKELETON: fill GET_TILING_DATA, queues, Compute, and tail handling.',
+        '// For a tail smaller than 32B, pad to a 32B window and mask lanes;',
+        '// do not issue a sub-32B DataCopyPad.',
+        f'extern "C" __global__ __aicore__ void {op_name.lower()}({kernel_args}, GM_ADDR workspace, GM_ADDR tiling) {{',
+        '    // TODO: GET_TILING_DATA(tilingData, tiling);',
+        '    // TODO: allocate queues and implement CopyIn / Compute / CopyOut.',
+        '}',
+        '',
+    ]
+    kernel_path = output / "question" / "op_kernel" / f"{op_name.lower()}.cpp"
+    kernel_path.write_text("\n".join(kernel), encoding="utf-8")
     (output / "question" / "README.md").write_text(
         "# Packaging skeleton\n\n"
-        "Implement the operator here; do not copy the reference implementation.\n"
-        "Use `api_desc.md` and `cases.csv` as the contract.\n",
+        "`op_host/<name>.cpp` and `op_kernel/<name>.cpp` are skeletons only.\n"
+        "Fill tiling, queues, compute, and tail handling; do not copy reference/answer.\n",
         encoding="utf-8",
     )
     metadata = {

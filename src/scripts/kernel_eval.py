@@ -256,7 +256,61 @@ def update_best(task: Path, solution: Path, envelope: dict) -> None:
     }
     best_score_path(task).write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
+def classify_failure_origins(
+    statuses: Counter, failures: list[dict], stderr: str, passed: int
+) -> tuple[dict, str, dict]:
+    evidence = stderr.lower()
+    reference_op = any(marker in evidence for marker in (
+        "aclnnreplicationpad", "aclnnuniform", "aclnninplaceuniform",
+        "call aclnn", "reference run() failed",
+    ))
+    device_stream = any(marker in evidence for marker in (
+        "rtstreamsynchronizewithtimeout", "acl stream", "device fault",
+        "aicore exception", "507014", "507034", "suspect remote error",
+    ))
+    origins: dict[str, int] = {}
+    for failure in failures:
+        status = str(failure.get("status") or "")
+        if status == "COMPILE_ERROR":
+            origin = "build"
+        elif status == "INCORRECT_NUMERICAL":
+            origin = "candidate"
+        elif status in {"RUNTIME_ERROR", "TIMEOUT", "LAUNCH_ERROR"}:
+            if reference_op and not device_stream:
+                origin = "reference"
+            elif device_stream:
+                origin = "environment"
+            elif passed > 0:
+                origin = "candidate_mixed"
+            else:
+                origin = "candidate"
+        elif status == "REWARD_HACK":
+            origin = "candidate"
+        else:
+            origin = "unknown"
+        failure["origin"] = origin
+        origins[origin] = origins.get(origin, 0) + 1
+    if not failures:
+        return origins, "candidate", {"valid_evaluation": True, "reference_failures": 0}
+    if origins.get("build"):
+        attribution = "build"
+    elif origins.get("candidate") or origins.get("candidate_mixed"):
+        attribution = "candidate"
+    elif origins.get("reference"):
+        attribution = "reference"
+    elif origins.get("environment"):
+        attribution = "environment"
+    else:
+        attribution = "harness"
+    return origins, attribution, {
+        "valid_evaluation": bool(statuses),
+        "reference_failures": origins.get("reference", 0),
+    }
+
+
 def attribution(stdout: str, stderr: str, traces: Path) -> str:
+    # Kept for callers that only have raw logs; the run path uses per-failure
+    # origins and does not trust a whole-run string match.
     evidence = (stdout + "\n" + stderr).lower()
     if any(marker in evidence for marker in (
         "fault kernel_name=", "aicore exception", "device fault", "kernel execute failed",
@@ -276,7 +330,6 @@ def attribution(stdout: str, stderr: str, traces: Path) -> str:
     if not traces.is_file():
         return "harness"
     return "candidate"
-
 
 def main() -> int:
     parser = argparse.ArgumentParser()
@@ -424,7 +477,12 @@ def main() -> int:
         "max_rel": errors["max_rel"],
         "coverage": coverage_report(expected_workloads, tested),
     }
-    attribution_value = attribution(stdout_text, stderr_text, traces)
+    origins, attribution_value, validity = classify_failure_origins(
+        statuses, failures, stderr_text, passed
+    )
+    metrics["failure_origins"] = origins
+    metrics["valid_evaluation"] = validity["valid_evaluation"]
+    metrics["reference_failures"] = validity["reference_failures"]
     envelope.update({
         "metrics": metrics,
         "failures": failures,
@@ -435,6 +493,7 @@ def main() -> int:
             "reference": "invalid_reference",
             "environment": "environment",
             "harness": "harness",
+            "build": "build",
             "candidate": "candidate",
         }.get(attribution_value, "candidate"),
     })

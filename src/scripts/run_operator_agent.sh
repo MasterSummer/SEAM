@@ -173,7 +173,7 @@ Tools:
 - local smoke (primary; no official evaluator needed):
   python $REPO_ROOT/src/scripts/fast_iter.py bootstrap --task $WORKSPACE
   python $REPO_ROOT/src/scripts/fast_iter.py build --task $WORKSPACE
-  python $REPO_ROOT/src/scripts/fast_iter.py run --task $WORKSPACE --suite matrix --limit 8 --device $DEVICE --feedback $WORKSPACE/feedback.jsonl
+  python $REPO_ROOT/src/scripts/fast_iter.py run --task $WORKSPACE --suite auto --limit 8 --device $DEVICE --feedback $WORKSPACE/feedback.jsonl
 - official smoke (optional; only to stage a build tree or for integration):
   python $REPO_ROOT/src/scripts/kernel_eval.py smoke \\
     --task $WORKSPACE --solution $WORKSPACE/solution.json \\
@@ -202,8 +202,8 @@ Rules:
    - Once solution.json exists, build and run tiny/contract cases:
        fast_iter.py bootstrap --task <workspace>
        fast_iter.py build --task <workspace>
-       fast_iter.py run --task <workspace> --suite matrix --limit 8 --device <card> --feedback <workspace>/feedback.jsonl
-   - '--suite matrix' covers one large representative per shape/dtype group.
+       fast_iter.py run --task <workspace> --suite auto --limit 8 --device <card> --feedback <workspace>/feedback.jsonl
+   - '--suite auto' covers one large representative per shape/dtype group.
      Use '--suite edge' for tail/empty/non-last, and '--workloads <uuid>' to replay
      a specific failure.
    - Official smoke is optional. Use at most one '--limit 1' run when fast_iter
@@ -211,7 +211,7 @@ Rules:
      official smoke as the repeated iteration loop.
    - Official full is authoritative; run it after local smoke passes, not after
      local smoke fails. After a failed full, read replay.json and rerun those
-     UUIDs with `fast_iter --workloads ...` before trying full again.
+     UUIDs with 'fast_iter --workloads ...' before trying full again.
 5. Selftest (on demand, not every edit):
    - Write selftest/plan.md + cases.json + run_selftest.py when a risk is concrete:
      new dtype/layout, tail/non-last dim, runtime error, smoke-passed/full-failed,

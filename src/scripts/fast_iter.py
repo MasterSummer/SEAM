@@ -175,6 +175,21 @@ def build(task: Path, staged: Path, jobs: int) -> dict:
 
 
 def select_suite(task: Path, all_workloads: list[dict], suite: str, limit: int, workloads: str) -> list[dict]:
+    if suite == "auto":
+        replay = task / "replay.json"
+        wanted = []
+        if replay.is_file():
+            try:
+                wanted = [str(item) for item in (json.loads(replay.read_text()).get("failed_uuids") or [])]
+            except json.JSONDecodeError:
+                wanted = []
+        chosen = [item for item in all_workloads if str(item.get("uuid")) in set(wanted)]
+        if len(chosen) >= max(1, limit):
+            return chosen[:max(1, limit)]
+        # fill remaining slots with the matrix representatives
+        remaining = [item for item in select_suite(task, all_workloads, "matrix", limit, "")
+                     if str(item.get("uuid")) not in {str(x.get("uuid")) for x in chosen}]
+        return (chosen + remaining)[:max(1, limit)]
     if workloads:
         wanted = {item.strip() for item in workloads.split(",") if item.strip()}
         return [item for item in all_workloads if item.get("uuid") in wanted]
@@ -314,7 +329,7 @@ def main() -> int:
         cmd.add_argument("--device", type=int, default=0)
         cmd.add_argument("--timeout", type=int, default=300)
         cmd.add_argument("--feedback", default="")
-        cmd.add_argument("--suite", choices=["first","matrix","edge","all"], default="first")
+        cmd.add_argument("--suite", choices=["auto","first","matrix","edge","all"], default="first")
     args = parser.parse_args()
     task = Path(args.task).expanduser().resolve()
     if args.command == "bootstrap":
