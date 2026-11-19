@@ -210,7 +210,8 @@ Rules:
      has no staged build tree, or when you need an integration check. Do not use
      official smoke as the repeated iteration loop.
    - Official full is authoritative; run it after local smoke passes, not after
-     local smoke fails.
+     local smoke fails. After a failed full, read replay.json and rerun those
+     UUIDs with `fast_iter --workloads ...` before trying full again.
 5. Selftest (on demand, not every edit):
    - Write selftest/plan.md + cases.json + run_selftest.py when a risk is concrete:
      new dtype/layout, tail/non-last dim, runtime error, smoke-passed/full-failed,
@@ -326,6 +327,13 @@ if [[ -f "$FINAL_SOLUTION" ]]; then
   FULL_DUR=$(( $(date +%s) - FULL_START ))
 else
   echo "final full skipped: solution.json missing" >> "$OUT/agent.log"
+fi
+
+if [[ -f "$WORKSPACE/final-feedback.jsonl" ]]; then
+  python3 "$REPO_ROOT/src/scripts/replay_full.py" \
+    --task "$WORKSPACE" \
+    --feedback "$WORKSPACE/final-feedback.jsonl" \
+    --output "$WORKSPACE/replay.json" >> "$OUT/agent.log" 2>&1 || true
 fi
 
 cat > "$OUT/run.json" <<JSON

@@ -13,7 +13,7 @@ import torch_npu  # noqa: F401
 from npu_kernelbench.cli.config import BenchmarkConfig
 from npu_kernelbench.data.definition import Definition
 from npu_kernelbench.data.solution import Solution
-from npu_kernelbench.data.workload import Workload
+from npu_kernelbench.data.workload import ToleranceSpec, Workload
 from npu_kernelbench.evaluator.default import DefaultEvaluator
 
 
@@ -30,6 +30,19 @@ def main() -> int:
         for line in (task / "workload.jsonl").read_text().splitlines()
         if line.strip()
     ]
+
+    # Task-card validation hook: per-case tolerance overrides.
+    checks_path = task / "validation" / "checks.json"
+    checks = {}
+    if checks_path.is_file():
+        for item in json.loads(checks_path.read_text()).get("cases", []):
+            if item.get("uuid"):
+                checks[item["uuid"]] = item.get("tolerance") or {}
+    # A task-specific reference module may replace definition.reference.
+    module_path = task / "validation" / "module.py"
+    if module_path.is_file():
+        definition = definition.model_copy(update={"reference": module_path.read_text()})
+
     torch.ops.load_library(str(task / "kernel.so"))
 
     import importlib.util
@@ -52,6 +65,8 @@ def main() -> int:
     )
     evaluator = DefaultEvaluator()
     for workload in workloads:
+        if workload.uuid in checks:
+            workload = workload.model_copy(update={"tolerance": ToleranceSpec(**checks[workload.uuid])})
         try:
             baseline = evaluator.build_baseline(definition, workload, "npu:0", config)
             trace = evaluator.evaluate(definition, workload, fn, baseline, config)

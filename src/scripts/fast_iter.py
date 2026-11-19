@@ -99,6 +99,8 @@ def sync_eval_dir(task: Path, staged: Path, selected: list[dict], device: int) -
             shutil.copy2(src, fast / name)
     if (staged / "sources").is_dir():
         shutil.copytree(staged / "sources", fast / "sources")
+    if (task / "task_card" / "validation").is_dir():
+        shutil.copytree(task / "task_card" / "validation", fast / "validation")
     with (fast / "workload.jsonl").open("w", encoding="utf-8") as stream:
         for item in selected:
             stream.write(json.dumps(item, ensure_ascii=False) + "\n")
