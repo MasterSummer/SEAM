@@ -169,8 +169,9 @@ Task deadline: $DEADLINE (about $((TASK_BUDGET / 60)) minutes from launch)
 Tools:
 - read / write / edit / glob / grep / bash / subagent
 - local smoke (primary; no official evaluator needed):
+  python $REPO_ROOT/src/scripts/fast_iter.py bootstrap --task $WORKSPACE
   python $REPO_ROOT/src/scripts/fast_iter.py build --task $WORKSPACE
-  python $REPO_ROOT/src/scripts/fast_iter.py run --task $WORKSPACE --limit 4 --device $DEVICE
+  python $REPO_ROOT/src/scripts/fast_iter.py run --task $WORKSPACE --limit 4 --device $DEVICE --feedback $WORKSPACE/feedback.jsonl
 - official smoke (optional; only to stage a build tree or for integration):
   python $REPO_ROOT/src/scripts/kernel_eval.py smoke \\
     --task $WORKSPACE --solution $WORKSPACE/solution.json \\
@@ -194,8 +195,9 @@ Rules:
 3. No torch.cat/reference bypass, no CPU fallback, no fake success. Follow docs/operator_constraints.example.json.
 4. Validation loop: local smoke is the default, not official smoke.
    - Once solution.json exists, build and run tiny/contract cases:
+       fast_iter.py bootstrap --task <workspace>
        fast_iter.py build --task <workspace>
-       fast_iter.py run --task <workspace> --limit 4 --device <card>
+       fast_iter.py run --task <workspace> --limit 4 --device <card> --feedback <workspace>/feedback.jsonl
    - Official smoke is optional. Use at most one '--limit 1' run when fast_iter
      has no staged build tree, or when you need an integration check. Do not use
      official smoke as the repeated iteration loop.
