@@ -168,19 +168,21 @@ Task deadline: $DEADLINE (about $((TASK_BUDGET / 60)) minutes from launch)
 
 Tools:
 - read / write / edit / glob / grep / bash / subagent
-- smoke/full evaluator via bash:
+- local smoke (primary; no official evaluator needed):
+  python $REPO_ROOT/src/scripts/fast_iter.py build --task $WORKSPACE
+  python $REPO_ROOT/src/scripts/fast_iter.py run --task $WORKSPACE --limit 4 --device $DEVICE
+- official smoke (optional; only to stage a build tree or for integration):
   python $REPO_ROOT/src/scripts/kernel_eval.py smoke \\
     --task $WORKSPACE --solution $WORKSPACE/solution.json \\
-    --device $DEVICE --limit 2 --output-dir $WORKSPACE/evaluations \\
+    --device $DEVICE --limit 1 --output-dir $WORKSPACE/evaluations \\
     --feedback $WORKSPACE/feedback.jsonl --kernelbench-root $KB_ROOT
+- authoritative full (final):
   python $REPO_ROOT/src/scripts/kernel_eval.py full \\
     --task $WORKSPACE --solution $WORKSPACE/solution.json \\
     --device $DEVICE --timeout 2400 --output-dir $WORKSPACE/evaluations \\
     --feedback $WORKSPACE/feedback.jsonl --kernelbench-root $KB_ROOT
+- selftest (optional; plain Python test is enough):
   python $REPO_ROOT/src/scripts/selftest_eval.py --task $WORKSPACE --feedback $WORKSPACE/feedback.jsonl
-  python $REPO_ROOT/src/scripts/fast_iter.py build --task $WORKSPACE
-  python $REPO_ROOT/src/scripts/fast_iter.py run --task $WORKSPACE --limit 4 --device $DEVICE
-
 Rules:
 0. Preflight first: run 'ls -l /dev/davinci$DEVICE' and a tiny
    'python -c "import torch,torch_npu; print(torch.npu.is_available(), torch.npu.device_count())"'.
@@ -190,12 +192,15 @@ Rules:
 2. Write a valid KernelBench solution.json plus main.py / op_host / op_kernel. Use the native Cat example only as a packaging reference:
    /opt/data/npu_kernelbench_runs/llm-cat/workspace
 3. No torch.cat/reference bypass, no CPU fallback, no fake success. Follow docs/operator_constraints.example.json.
-4. Evaluation: once the first solution.json exists, build it and run one official
-   smoke so the evaluator stages a build tree. After that, prefer the cheap loop:
-     fast_iter.py build --task <workspace>
-     fast_iter.py run --task <workspace> --limit 4 --device <card>
-   Use tiny/contract cases for fast iteration; official smoke is the integration
-   check and official full is authoritative. Full only after smoke passes.
+4. Validation loop: local smoke is the default, not official smoke.
+   - Once solution.json exists, build and run tiny/contract cases:
+       fast_iter.py build --task <workspace>
+       fast_iter.py run --task <workspace> --limit 4 --device <card>
+   - Official smoke is optional. Use at most one '--limit 1' run when fast_iter
+     has no staged build tree, or when you need an integration check. Do not use
+     official smoke as the repeated iteration loop.
+   - Official full is authoritative; run it after local smoke passes, not after
+     local smoke fails.
 5. Selftest (on demand, not every edit):
    - Write selftest/plan.md + cases.json + run_selftest.py when a risk is concrete:
      new dtype/layout, tail/non-last dim, runtime error, smoke-passed/full-failed,
