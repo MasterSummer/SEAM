@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import sys
 import traceback
+import importlib.util
 from pathlib import Path
 
 import torch
@@ -14,7 +15,8 @@ from npu_kernelbench.cli.config import BenchmarkConfig
 from npu_kernelbench.data.definition import Definition
 from npu_kernelbench.data.solution import Solution
 from npu_kernelbench.data.workload import ToleranceSpec, Workload
-from npu_kernelbench.evaluator.default import DefaultEvaluator
+from npu_kernelbench.evaluator.default import DefaultEvaluator, _run_reference
+from npu_kernelbench.evaluator.evaluator import BaselineHandle
 
 
 def status_value(value: object) -> str:
@@ -43,9 +45,16 @@ def main() -> int:
     if module_path.is_file():
         definition = definition.model_copy(update={"reference": module_path.read_text()})
 
-    torch.ops.load_library(str(task / "kernel.so"))
+    prepare = None
+    prepare_path = task / "validation" / "prepare_inputs.py"
+    if prepare_path.is_file():
+        prep_spec = importlib.util.spec_from_file_location("fast_prepare_inputs", prepare_path)
+        prep_module = importlib.util.module_from_spec(prep_spec)
+        assert prep_spec.loader is not None
+        prep_spec.loader.exec_module(prep_module)
+        prepare = getattr(prep_module, "prepare", None)
 
-    import importlib.util
+    torch.ops.load_library(str(task / "kernel.so"))
 
     entry = task / "sources" / solution.get_entry_path()
     spec = importlib.util.spec_from_file_location("fast_candidate", entry)
@@ -68,7 +77,19 @@ def main() -> int:
         if workload.uuid in checks:
             workload = workload.model_copy(update={"tolerance": ToleranceSpec(**checks[workload.uuid])})
         try:
-            baseline = evaluator.build_baseline(definition, workload, "npu:0", config)
+            inputs = None
+            if callable(prepare):
+                inputs = prepare(workload, "npu:0", config.seed)
+            if inputs is not None:
+                if not isinstance(inputs, (list, tuple)):
+                    inputs = [inputs]
+                outputs = _run_reference(definition.reference, list(inputs), list(definition.outputs.keys()))
+                baseline = BaselineHandle(
+                    definition_name=definition.name, device="npu:0",
+                    workload_uuid=workload.uuid, inputs=list(inputs), outputs=outputs,
+                )
+            else:
+                baseline = evaluator.build_baseline(definition, workload, "npu:0", config)
             trace = evaluator.evaluate(definition, workload, fn, baseline, config)
             evaluation = trace.evaluation
             correctness = evaluation.correctness

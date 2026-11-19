@@ -173,7 +173,14 @@ def make_card(task: Path, output: Path) -> dict:
     (output / "validation" / "README.md").write_text(
         "# Validation contract\n\n"
         "`cases.csv` is the shape/dtype/attr/tolerance matrix; `checks.json` keeps the\n"
-        "per-case tolerance. Task-specific custom checks belong here, not in a global evaluator.\n",
+        "per-case tolerance. Task-specific custom checks belong here, not in a global evaluator.\n\n"
+        "`prepare_inputs.py` may define `prepare(workload, device, seed)` returning a list\n"
+        "of tensors in definition input order. Return None to use the official generator.\n",
+        encoding="utf-8")
+    (output / "validation" / "prepare_inputs.py").write_text(
+        "def prepare(workload, device=\"npu:0\", seed=200):\n"
+        "    \"\"\"Return a list of inputs in definition order, or None to use the official generator.\"\"\"\n"
+        "    return None\n",
         encoding="utf-8")
     with (output / "shape_matrix.csv").open("w", newline="", encoding="utf-8") as stream:
         writer = csv.writer(stream)

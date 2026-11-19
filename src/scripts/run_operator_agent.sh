@@ -184,6 +184,8 @@ Tools:
     --task $WORKSPACE --solution $WORKSPACE/solution.json \\
     --device $DEVICE --timeout 2400 --output-dir $WORKSPACE/evaluations \\
     --feedback $WORKSPACE/feedback.jsonl --kernelbench-root $KB_ROOT
+- skeleton compile check (optional):
+  python $REPO_ROOT/src/scripts/validate_task_card.py --task $WORKSPACE
 - selftest (optional; plain Python test is enough):
   python $REPO_ROOT/src/scripts/selftest_eval.py --task $WORKSPACE --feedback $WORKSPACE/feedback.jsonl
 Rules:
@@ -195,8 +197,10 @@ Rules:
    These are the explicit semantics + shape/dtype/attr matrix. Then read definition.json,
    workload.jsonl and reference. Use case_id/uuid when selecting local tests; do not
    assume the first few cases cover the matrix.
-2. Write a valid KernelBench solution.json plus main.py / op_host / op_kernel. Use the native Cat example only as a packaging reference:
-   /opt/data/npu_kernelbench_runs/llm-cat/workspace
+2. Write a valid KernelBench solution.json plus main.py / op_host / op_kernel.
+   Use task_card/question/op_host and task_card/question/op_kernel as engineering
+   skeletons (signatures/registration only), and the native Cat example only as
+   a packaging reference: /opt/data/npu_kernelbench_runs/llm-cat/workspace
 3. No torch.cat/reference bypass, no CPU fallback, no fake success. Follow docs/operator_constraints.example.json.
 4. Validation loop: local smoke is the default, not official smoke.
    - Once solution.json exists, build and run tiny/contract cases:
