@@ -291,7 +291,10 @@ def classify_failure_origins(
         failure["origin"] = origin
         origins[origin] = origins.get(origin, 0) + 1
     if not failures:
-        return origins, "candidate", {"valid_evaluation": True, "reference_failures": 0}
+        return origins, "candidate", {
+            "valid_evaluation": bool(statuses),
+            "reference_failures": 0,
+        }
     if origins.get("build"):
         attribution = "build"
     elif origins.get("candidate") or origins.get("candidate_mixed"):
