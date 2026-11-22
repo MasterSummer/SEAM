@@ -250,6 +250,28 @@ def make_card(task: Path, output: Path) -> dict:
         for uuid, reason in required.items():
             writer.writerow([reason, uuid])
 
+    semantics = [
+        "# Semantics and edge rules", "",
+        "- axis/dim selects the dimension that is indexed or reduced.",
+        "- index values select positions along that axis; output shape follows the reference.",
+        "- Empty tensors, tail elements, and dtype casts must be handled explicitly.",
+    ]
+    if "indexput" in lowered or "scatter" in lowered:
+        semantics += [
+            "- Duplicate indices with accumulate=False are undefined in the reference.",
+            "  Do not chase an undefined last-wins result; test unique indices or accumulate=True.",
+        ]
+    if "iou" in lowered or "nms" in lowered:
+        semantics += ["- Zero-area boxes: define the result explicitly; do not rely on 0/0 NaN."]
+    if "cumsum" in lowered:
+        semantics += ["- Accumulation dtype and large-value overflow are part of the contract."]
+    if "quant" in lowered:
+        semantics += [
+            "- Quantization scale = max_abs / 127, clamped >= 1e-10.",
+            "- Round is ties-to-even; clamp to [-128,127] before int8 store.",
+        ]
+    (output / "semantics.md").write_text("\n".join(semantics) + "\n", encoding="utf-8")
+
     # Engineering skeletons only: no algorithm, no answer.
     input_names = list(inputs)
     output_names = list(outputs)

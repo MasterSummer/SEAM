@@ -204,7 +204,7 @@ Rules:
    'python -c "import torch,torch_npu; print(torch.npu.is_available(), torch.npu.device_count())"'.
    If the device is not visible, stop and report an environment blocker immediately;
    do not spend the budget building a candidate that cannot be evaluated.
-1. Read task_card/checklist.md, api_desc.md, cases.csv and shape_matrix.csv first.
+1. Read task_card/checklist.md, semantics.md, api_desc.md, cases.csv and shape_matrix.csv first.
    These are the explicit semantics + shape/dtype/attr matrix. Then read definition.json,
    workload.jsonl and reference. Use case_id/uuid when selecting local tests; do not
    assume the first few cases cover the matrix.
