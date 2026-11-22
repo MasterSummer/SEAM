@@ -71,6 +71,15 @@ cp -a "$TASK_DIR" "$WORKSPACE"
 rm -f "$WORKSPACE/solution.json"
 mkdir -p "$WORKSPACE/candidates" "$WORKSPACE/evaluations" "$WORKSPACE/subagents" \
   "$WORKSPACE/selftest/change_requests" "$WORKSPACE/best" "$OUT/tmp"
+
+if [[ -n "${SEAM_REPLAY_UUIDS:-}" ]]; then
+  python3 - "$WORKSPACE/replay.json" "$SEAM_REPLAY_UUIDS" <<'PY'
+import json, sys
+path, raw = sys.argv[1], sys.argv[2]
+items = [item.strip() for item in raw.split(',') if item.strip()]
+open(path, 'w').write(json.dumps({"failed_uuids": items}, ensure_ascii=False) + "\n")
+PY
+fi
 touch "$WORKSPACE/notes.md" "$WORKSPACE/experiments.md"
 cat > "$WORKSPACE/research.md" <<'EOF'
 # Research log
