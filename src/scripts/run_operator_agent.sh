@@ -336,7 +336,10 @@ fi
 
 FINAL_SOLUTION="$WORKSPACE/solution.json"
 [[ -f "$WORKSPACE/best/solution.json" ]] && FINAL_SOLUTION="$WORKSPACE/best/solution.json"
-if [[ -f "$FINAL_SOLUTION" ]]; then
+if [[ "$REVIEW_RC" -ne 0 ]]; then
+  echo "final full blocked: implementation review failed (review_exit=$REVIEW_RC)" >> "$OUT/agent.log"
+  FULL_RC=3
+elif [[ -f "$FINAL_SOLUTION" ]]; then
   echo "final authoritative full eval (timeout ${FULL_TIMEOUT}s, solution=$FINAL_SOLUTION)..." >> "$OUT/agent.log"
   FULL_START=$(date +%s)
   set +e
