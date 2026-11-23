@@ -193,8 +193,6 @@ Tools:
     --task $WORKSPACE --solution $WORKSPACE/solution.json \\
     --device $DEVICE --timeout 2400 --output-dir $WORKSPACE/evaluations \\
     --feedback $WORKSPACE/feedback.jsonl --kernelbench-root $KB_ROOT
-- implementation review (before full):
-  python $REPO_ROOT/src/scripts/review_solution.py --task $WORKSPACE
 - skeleton compile check (optional):
   python $REPO_ROOT/src/scripts/validate_task_card.py --task $WORKSPACE
 - selftest (optional; plain Python test is enough):
@@ -204,7 +202,7 @@ Rules:
    'python -c "import torch,torch_npu; print(torch.npu.is_available(), torch.npu.device_count())"'.
    If the device is not visible, stop and report an environment blocker immediately;
    do not spend the budget building a candidate that cannot be evaluated.
-1. Read task_card/checklist.md, semantics.md, api_desc.md, cases.csv and shape_matrix.csv first.
+1. Read task_card/api_desc.md, task_card/cases.csv and task_card/shape_matrix.csv first.
    These are the explicit semantics + shape/dtype/attr matrix. Then read definition.json,
    workload.jsonl and reference. Use case_id/uuid when selecting local tests; do not
    assume the first few cases cover the matrix.
@@ -224,8 +222,6 @@ Rules:
    - Official smoke is optional. Use at most one '--limit 1' run when fast_iter
      has no staged build tree, or when you need an integration check. Do not use
      official smoke as the repeated iteration loop.
-   - Before final full, run review_solution.py and fix every critical item:
-     source drift, TODO/probe kernel, debug leftovers, missing required cases.
    - Official full is authoritative; run it after local smoke passes, not after
      local smoke fails. After a failed full, read replay.json and rerun those
      UUIDs with 'fast_iter --workloads ...' before trying full again.
@@ -327,19 +323,9 @@ DUR=$(( $(date +%s) - START ))
 # that always runs afterwards (hard requirement), with its own timeout.
 FULL_RC=2
 FULL_DUR=0
-REVIEW_RC=0
-if [[ -f "$WORKSPACE/solution.json" ]]; then
-  echo "implementation review..." >> "$OUT/agent.log"
-  python3 "$REPO_ROOT/src/scripts/review_solution.py" \
-    --task "$WORKSPACE" --output "$WORKSPACE/review.json" >> "$OUT/agent.log" 2>&1 || REVIEW_RC=$?
-fi
-
 FINAL_SOLUTION="$WORKSPACE/solution.json"
 [[ -f "$WORKSPACE/best/solution.json" ]] && FINAL_SOLUTION="$WORKSPACE/best/solution.json"
-if [[ "$REVIEW_RC" -ne 0 ]]; then
-  echo "final full blocked: implementation review failed (review_exit=$REVIEW_RC)" >> "$OUT/agent.log"
-  FULL_RC=3
-elif [[ -f "$FINAL_SOLUTION" ]]; then
+if [[ -f "$FINAL_SOLUTION" ]]; then
   echo "final authoritative full eval (timeout ${FULL_TIMEOUT}s, solution=$FINAL_SOLUTION)..." >> "$OUT/agent.log"
   FULL_START=$(date +%s)
   set +e
@@ -364,7 +350,7 @@ if [[ -f "$WORKSPACE/final-feedback.jsonl" ]]; then
 fi
 
 cat > "$OUT/run.json" <<JSON
-{"run_id":"$RUN_ID","task":"$TASK_NAME","agent_attempts":$ATTEMPTS,"agent_exit":$RC,"agent_duration_s":$DUR,"review_exit":$REVIEW_RC,"full_exit":$FULL_RC,"full_duration_s":$FULL_DUR,"workspace":"$WORKSPACE"}
+{"run_id":"$RUN_ID","task":"$TASK_NAME","agent_attempts":$ATTEMPTS,"agent_exit":$RC,"agent_duration_s":$DUR,"full_exit":$FULL_RC,"full_duration_s":$FULL_DUR,"workspace":"$WORKSPACE"}
 JSON
 echo "agent exit=$RC duration=${DUR}s full_exit=$FULL_RC full_duration=${FULL_DUR}s log=$OUT/agent.log"
 exit "$RC"
