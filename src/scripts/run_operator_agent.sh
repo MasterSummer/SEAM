@@ -360,10 +360,16 @@ if [[ -f "$WORKSPACE/final-feedback.jsonl" ]]; then
     --task "$WORKSPACE" \
     --feedback "$WORKSPACE/final-feedback.jsonl" \
     --output "$WORKSPACE/replay.json" >> "$OUT/agent.log" 2>&1 || true
+  python3 "$REPO_ROOT/src/scripts/triage_agent.py" \
+    --task "$WORKSPACE" --output "$WORKSPACE/triage.json" >> "$OUT/agent.log" 2>&1 || true
 fi
 
+TRIAGE_DECISION=""
+if [[ -f "$WORKSPACE/triage.json" ]]; then
+  TRIAGE_DECISION=$(python3 -c "import json; print(json.load(open('$WORKSPACE/triage.json')).get('decision',''))" 2>/dev/null || true)
+fi
 cat > "$OUT/run.json" <<JSON
-{"run_id":"$RUN_ID","task":"$TASK_NAME","agent_attempts":$ATTEMPTS,"agent_exit":$RC,"agent_duration_s":$DUR,"review_exit":$REVIEW_RC,"full_exit":$FULL_RC,"full_duration_s":$FULL_DUR,"workspace":"$WORKSPACE"}
+{"run_id":"$RUN_ID","task":"$TASK_NAME","agent_attempts":$ATTEMPTS,"agent_exit":$RC,"agent_duration_s":$DUR,"review_exit":$REVIEW_RC,"triage_decision":"$TRIAGE_DECISION","full_exit":$FULL_RC,"full_duration_s":$FULL_DUR,"workspace":"$WORKSPACE"}
 JSON
 echo "agent exit=$RC duration=${DUR}s full_exit=$FULL_RC full_duration=${FULL_DUR}s log=$OUT/agent.log"
 exit "$RC"
