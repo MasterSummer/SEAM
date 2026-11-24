@@ -201,6 +201,8 @@ def make_card(task: Path, output: Path) -> dict:
         "dtype cast/round mode matches the reference (especially f32->f16/bf16).",
         "solution.json sources are byte-identical to the workspace sources.",
         "No debug/probe/TODO kernel is submitted as the final solution.",
+        "Workspace, blockDim, and UB/queue sizes are checked for the largest case before full.",
+        "One tiny and one largest case both ran without RUNTIME_ERROR before full.",
         "At least one tiny, one tail/edge, and one large local case passed.",
     ]
     if "quant" in lowered:

@@ -226,6 +226,8 @@ Rules:
      official smoke as the repeated iteration loop.
    - Before final full, run review_solution.py and fix every critical item:
      source drift, TODO/probe kernel, debug leftovers, missing required cases.
+   - Runtime gate: before full, verify workspace/blockDim/UB sizes and run one
+     tiny plus one largest case without RUNTIME_ERROR.
    - Official full is authoritative; run it after local smoke passes, not after
      local smoke fails. After a failed full, read replay.json and rerun those
      UUIDs with 'fast_iter --workloads ...' before trying full again.
