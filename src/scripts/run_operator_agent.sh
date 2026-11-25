@@ -224,6 +224,7 @@ Rules:
    - Official smoke is optional. Use at most one '--limit 1' run when fast_iter
      has no staged build tree, or when you need an integration check. Do not use
      official smoke as the repeated iteration loop.
+   - On a failure, read analysis/failure-card.md before changing code.
    - Before final full, run review_solution.py and fix every critical item:
      source drift, TODO/probe kernel, debug leftovers, missing required cases.
    - Runtime gate: before full, verify workspace/blockDim/UB sizes and run one
@@ -362,6 +363,11 @@ if [[ -f "$WORKSPACE/final-feedback.jsonl" ]]; then
     --output "$WORKSPACE/replay.json" >> "$OUT/agent.log" 2>&1 || true
   python3 "$REPO_ROOT/src/scripts/triage_agent.py" \
     --task "$WORKSPACE" --output "$WORKSPACE/triage.json" >> "$OUT/agent.log" 2>&1 || true
+  IS_PASS=$(python3 -c "import json; e=json.loads(open('$WORKSPACE/final-feedback.jsonl').read().splitlines()[-1]); print(1 if e.get('metrics',{}).get('operator_passed') else 0)" 2>/dev/null || echo 0)
+  if [[ "$IS_PASS" != "1" ]]; then
+    python3 "$REPO_ROOT/src/scripts/explain_failure.py" \
+      --task "$WORKSPACE" --output "$WORKSPACE/analysis" >> "$OUT/agent.log" 2>&1 || true
+  fi
 fi
 
 TRIAGE_DECISION=""
