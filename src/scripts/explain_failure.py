@@ -3,7 +3,9 @@
 from __future__ import annotations
 import argparse
 import json
+import os
 import re
+import subprocess
 from pathlib import Path
 
 ERROR_RE = re.compile(r"(?P<file>[^\s:]+\.(?:cpp|cc|cxx|h|hpp)):(?P<line>\d+)(?::(?P<col>\d+))?:\s*(?P<msg>.+)")
@@ -90,6 +92,31 @@ def parse_build_error(task: Path) -> dict:
     return {}
 
 
+def probe_one(task: Path, uuid: str, device: int) -> dict:
+    if not uuid:
+        return {}
+    venv = os.environ.get("FAST_PYTHON", "/home/yiding/npu-kernelbench/.venv/bin/python")
+    cmd = [
+        venv, str(Path(__file__).with_name("fast_iter.py")), "run",
+        "--task", str(task), "--workloads", uuid, "--limit", "1",
+        "--device", str(device), "--timeout", "300",
+    ]
+    try:
+        subprocess.run(cmd, capture_output=True, text=True, timeout=360)
+    except Exception as exc:  # noqa: BLE001
+        return {"error": f"{type(exc).__name__}: {exc}"}
+    result = read_json(task / "fast_eval" / "result.json")
+    for record in result.get("records") or []:
+        if str(record.get("workload")) == uuid:
+            return {
+                "uuid": uuid,
+                "status": record.get("status"),
+                "candidate_outputs": record.get("candidate_outputs"),
+                "reference_outputs": record.get("reference_outputs"),
+                "candidate_error": record.get("candidate_error"),
+            }
+    return {"uuid": uuid, "error": "no probe record"}
+
 def first_by_status(failures: list[dict], *statuses: str) -> dict:
     wanted = set(statuses)
     for failure in failures:
@@ -171,6 +198,8 @@ def main() -> int:
     parser.add_argument("--output", default="")
     parser.add_argument("--uuid", default="")
     parser.add_argument("--no-notes", action="store_true")
+    parser.add_argument("--probe", action="store_true")
+    parser.add_argument("--device", type=int, default=0)
     args = parser.parse_args()
     task = Path(args.task).resolve()
     ev = evidence(task)
@@ -180,6 +209,9 @@ def main() -> int:
         failure = next((f for f in ev["failures"] if f.get("workload") == args.uuid), failure)
     klass, reason = classify(ev, build_error)
     flags = process_flags(task, ev)
+    shape_evidence = {}
+    if args.probe and klass not in ("E0_build", "E4_environment"):
+        shape_evidence = probe_one(task, str(failure.get("workload") or ""), args.device)
     questions = build_questions(klass, build_error, failure)
     out_dir = Path(args.output).resolve() if args.output else task / "analysis"
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -194,6 +226,7 @@ def main() -> int:
             "max_rel": failure.get("max_relative_error"),
         },
         "build_error": build_error,
+        "shape_evidence": shape_evidence,
         "evidence": ev,
         "process_flags": flags,
         "questions": questions,
@@ -209,8 +242,9 @@ def main() -> int:
         f"- first_message: {failure.get('message') or ''}",
         f"- build_file_line: {build_error.get('file', '')}:{build_error.get('line', '')}",
         f"- build_message: {build_error.get('message', '')}",
-        f"- candidate_output: unknown (run one tiny probe)",
-        f"- reference_output: see case shape",
+        f"- candidate_output: {json.dumps((shape_evidence.get('candidate_outputs') if shape_evidence else None), ensure_ascii=False)}",
+        f"- reference_output: {json.dumps((shape_evidence.get('reference_outputs') if shape_evidence else None), ensure_ascii=False)}",
+        f"- candidate_error: {shape_evidence.get('candidate_error') if shape_evidence else None}",
         f"- local_result: {ev['local_status']} tested={ev['local_tested']} passed={ev['local_passed']}",
         f"- process_flags: {', '.join(flags) if flags else 'none'}",
         f"- next_single_check: {payload['next_single_check']}",

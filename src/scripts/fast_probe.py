@@ -90,6 +90,25 @@ def main() -> int:
                 )
             else:
                 baseline = evaluator.build_baseline(definition, workload, "npu:0", config)
+            candidate_outputs = None
+            reference_outputs = None
+            candidate_error = None
+            try:
+                candidate_value = fn(*list(baseline.inputs))
+                if torch.is_tensor(candidate_value):
+                    candidate_value = [candidate_value]
+                if isinstance(candidate_value, dict):
+                    candidate_value = [candidate_value[k] for k in definition.outputs]
+                candidate_outputs = [
+                    {"shape": list(t.shape), "dtype": str(t.dtype).replace("torch.", "")}
+                    for t in candidate_value if torch.is_tensor(t)
+                ]
+                reference_outputs = [
+                    {"shape": list(t.shape), "dtype": str(t.dtype).replace("torch.", "")}
+                    for t in (baseline.outputs or {}).values() if torch.is_tensor(t)
+                ]
+            except Exception as exc:  # noqa: BLE001
+                candidate_error = f"{type(exc).__name__}: {exc}"[:300]
             trace = evaluator.evaluate(definition, workload, fn, baseline, config)
             evaluation = trace.evaluation
             correctness = evaluation.correctness
@@ -100,6 +119,9 @@ def main() -> int:
                 "max_rel": getattr(correctness, "max_relative_error", None),
                 "has_nan": getattr(correctness, "has_nan", None),
                 "has_inf": getattr(correctness, "has_inf", None),
+                "candidate_outputs": candidate_outputs,
+                "reference_outputs": reference_outputs,
+                "candidate_error": candidate_error,
                 "log": (evaluation.log or "")[:500],
             }, ensure_ascii=False), flush=True)
         except Exception as exc:  # noqa: BLE001

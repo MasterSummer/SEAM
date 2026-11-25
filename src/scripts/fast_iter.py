@@ -251,6 +251,7 @@ def run(task: Path, staged: Path, limit: int, workloads: str, device: int, timeo
     (fast / "stdout.log").write_text(proc.stdout, encoding="utf-8")
     (fast / "stderr.log").write_text(proc.stderr, encoding="utf-8")
     traces = []
+    records = []
     for line in proc.stdout.splitlines():
         line = line.strip()
         if line.startswith("{"):
@@ -274,6 +275,7 @@ def run(task: Path, staged: Path, limit: int, workloads: str, device: int, timeo
                 })
             else:
                 traces.append(item)
+            records.append(item)
     statuses: dict[str, int] = {}
     max_abs = 0.0
     max_rel = 0.0
@@ -311,6 +313,7 @@ def run(task: Path, staged: Path, limit: int, workloads: str, device: int, timeo
         "max_abs": max_abs if max_abs else None,
         "max_rel": max_rel if max_rel else None,
         "failures": failures,
+        "records": records,
         "stdout": str(fast / "stdout.log"),
         "stderr": str(fast / "stderr.log"),
         "exit_code": proc.returncode,
