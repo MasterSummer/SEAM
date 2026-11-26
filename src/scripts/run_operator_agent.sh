@@ -224,6 +224,8 @@ Rules:
    - Official smoke is optional. Use at most one '--limit 1' run when fast_iter
      has no staged build tree, or when you need an integration check. Do not use
      official smoke as the repeated iteration loop.
+   - After a local case passes, snapshot the current solution:
+     python $REPO_ROOT/src/scripts/checkpoint.py --task $WORKSPACE --label <stage>.
    - On a failure, read analysis/failure-card.md and analysis/plan.json before changing code.
    - Work in short iterations: one failing UUID, one hypothesis, one change,
      one local fast_iter case, then record the result in notes.
@@ -339,9 +341,19 @@ if [[ -f "$WORKSPACE/solution.json" ]]; then
     --task "$WORKSPACE" --output "$WORKSPACE/review.json" >> "$OUT/agent.log" 2>&1 || REVIEW_RC=$?
 fi
 
+BUILD_GATE=0
+if [[ -f "$WORKSPACE/solution.json" ]]; then
+  echo "final build gate..." >> "$OUT/agent.log"
+  python3 "$REPO_ROOT/src/scripts/fast_iter.py" bootstrap --task "$WORKSPACE" --timeout 600 \
+    >> "$OUT/agent.log" 2>&1 || BUILD_GATE=$?
+fi
+
 FINAL_SOLUTION="$WORKSPACE/solution.json"
 [[ -f "$WORKSPACE/best/solution.json" ]] && FINAL_SOLUTION="$WORKSPACE/best/solution.json"
-if [[ -f "$FINAL_SOLUTION" ]]; then
+if [[ "$BUILD_GATE" -ne 0 ]]; then
+  echo "final full blocked: final build gate failed" >> "$OUT/agent.log"
+  FULL_RC=4
+elif [[ -f "$FINAL_SOLUTION" ]]; then
   echo "final authoritative full eval (timeout ${FULL_TIMEOUT}s, solution=$FINAL_SOLUTION)..." >> "$OUT/agent.log"
   FULL_START=$(date +%s)
   set +e
@@ -380,7 +392,7 @@ if [[ -f "$WORKSPACE/triage.json" ]]; then
   TRIAGE_DECISION=$(python3 -c "import json; print(json.load(open('$WORKSPACE/triage.json')).get('decision',''))" 2>/dev/null || true)
 fi
 cat > "$OUT/run.json" <<JSON
-{"run_id":"$RUN_ID","task":"$TASK_NAME","agent_attempts":$ATTEMPTS,"agent_exit":$RC,"agent_duration_s":$DUR,"review_exit":$REVIEW_RC,"triage_decision":"$TRIAGE_DECISION","full_exit":$FULL_RC,"full_duration_s":$FULL_DUR,"workspace":"$WORKSPACE"}
+{"run_id":"$RUN_ID","task":"$TASK_NAME","agent_attempts":$ATTEMPTS,"agent_exit":$RC,"agent_duration_s":$DUR,"review_exit":$REVIEW_RC,"build_gate":$BUILD_GATE,"triage_decision":"$TRIAGE_DECISION","full_exit":$FULL_RC,"full_duration_s":$FULL_DUR,"workspace":"$WORKSPACE"}
 JSON
 echo "agent exit=$RC duration=${DUR}s full_exit=$FULL_RC full_duration=${FULL_DUR}s log=$OUT/agent.log"
 exit "$RC"
