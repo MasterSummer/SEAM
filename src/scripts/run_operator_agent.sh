@@ -2,6 +2,12 @@
 # Thin kernel-agent loop: one persistent dsh session, all tools, task-level DDL.
 set -euo pipefail
 
+# Keep build/agent scratch off the shared /tmp filesystem.
+RUNTIME_TMP="${SEAM_TMPDIR:-/home/yiding/tmp}"
+mkdir -p "$RUNTIME_TMP"
+export TMPDIR="$RUNTIME_TMP"
+export SEAM_AGENT_TMPDIR="$RUNTIME_TMP"
+
 usage() {
   cat <<'USAGE'
 Usage:
@@ -289,7 +295,7 @@ START=$(date +%s)
 set +e
 (
   cd "$WORKSPACE"
-  export TMPDIR="$OUT/tmp" SEAM_AGENT_TMPDIR="$OUT/tmp"
+  export TMPDIR="$RUNTIME_TMP" SEAM_AGENT_TMPDIR="$RUNTIME_TMP"
   export ASCEND_RT_VISIBLE_DEVICES="$DEVICE"
   # bwrap's fresh /dev hides davinci nodes; this profile is trusted and needs NPU access.
   export DSH_PERMISSION_MODE="${SEAM_DSH_PERMISSION_MODE:-danger-full-access}"
@@ -317,7 +323,7 @@ RETRY
     set +e
     (
       cd "$WORKSPACE"
-      export TMPDIR="$OUT/tmp" SEAM_AGENT_TMPDIR="$OUT/tmp"
+      export TMPDIR="$RUNTIME_TMP" SEAM_AGENT_TMPDIR="$RUNTIME_TMP"
       export ASCEND_RT_VISIBLE_DEVICES="$DEVICE"
       export DSH_PERMISSION_MODE="${SEAM_DSH_PERMISSION_MODE:-danger-full-access}"
       export NO_PROXY='127.0.0.1,localhost,::1' no_proxy='127.0.0.1,localhost,::1'
@@ -344,7 +350,7 @@ fi
 BUILD_GATE=0
 if [[ -f "$WORKSPACE/solution.json" ]]; then
   echo "final build gate..." >> "$OUT/agent.log"
-  TMPDIR="$OUT/tmp" python3 "$REPO_ROOT/src/scripts/fast_iter.py" bootstrap --task "$WORKSPACE" --timeout 600 \
+  TMPDIR="$RUNTIME_TMP" python3 "$REPO_ROOT/src/scripts/fast_iter.py" bootstrap --task "$WORKSPACE" --timeout 600 \
     >> "$OUT/agent.log" 2>&1 || BUILD_GATE=$?
 fi
 
