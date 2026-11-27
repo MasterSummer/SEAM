@@ -344,7 +344,7 @@ fi
 BUILD_GATE=0
 if [[ -f "$WORKSPACE/solution.json" ]]; then
   echo "final build gate..." >> "$OUT/agent.log"
-  python3 "$REPO_ROOT/src/scripts/fast_iter.py" bootstrap --task "$WORKSPACE" --timeout 600 \
+  TMPDIR="$OUT/tmp" python3 "$REPO_ROOT/src/scripts/fast_iter.py" bootstrap --task "$WORKSPACE" --timeout 600 \
     >> "$OUT/agent.log" 2>&1 || BUILD_GATE=$?
 fi
 
